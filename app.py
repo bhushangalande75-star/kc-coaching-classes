@@ -576,8 +576,39 @@ def create_admin():
     print(f"Admin '{username}' created.")
 
 
+def run_lightweight_migrations():
+    """
+    db.create_all() only creates tables that don't exist yet — it never adds new
+    columns to a table that's already there. Since this app doesn't use a full
+    migration tool (Alembic), this checks each model's columns against what's
+    actually in the database and ALTERs the table to add anything missing.
+    Safe to run every startup — it's a no-op once columns already exist.
+    """
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(db.engine)
+    existing_tables = inspector.get_table_names()
+
+    for model in [Admin, Student, Attendance, Fee]:
+        table_name = model.__tablename__
+        if table_name not in existing_tables:
+            continue  # brand-new table, db.create_all() already handled it
+        existing_columns = {c["name"] for c in inspector.get_columns(table_name)}
+        for column in model.__table__.columns:
+            if column.name in existing_columns:
+                continue
+            col_type = column.type.compile(dialect=db.engine.dialect)
+            nullable = "" if column.nullable else ""  # new columns are always added nullable first
+            with db.engine.begin() as conn:
+                conn.execute(text(
+                    f'ALTER TABLE "{table_name}" ADD COLUMN "{column.name}" {col_type}'
+                ))
+            print(f"[migration] Added missing column {table_name}.{column.name}")
+
+
 with app.app_context():
     db.create_all()
+    run_lightweight_migrations()
     if not Admin.query.first():
         # First-run convenience default — change immediately after first login
         default_admin = Admin(username="admin")
