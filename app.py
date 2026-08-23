@@ -23,6 +23,11 @@ _db_url = os.environ.get(
 if _db_url.startswith("postgres://"):
     _db_url = _db_url.replace("postgres://", "postgresql://", 1)
 app.config["SQLALCHEMY_DATABASE_URI"] = _db_url
+
+# Ensure the instance/ folder exists when falling back to SQLite (it's git-ignored,
+# so it won't exist yet on a fresh deploy where DATABASE_URL isn't set).
+if _db_url.startswith("sqlite"):
+    os.makedirs(os.path.join(basedir, "instance"), exist_ok=True)
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db.init_app(app)
