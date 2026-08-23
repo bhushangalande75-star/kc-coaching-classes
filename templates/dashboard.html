@@ -55,8 +55,96 @@
 </div>
 {% endif %}
 
+<div class="card">
+  <div class="section-title"><h2>Attendance — Last 14 Days</h2></div>
+  <canvas id="attendanceChart" height="160"></canvas>
+</div>
+
+<div class="card">
+  <div class="section-title"><h2>Fee Collection — Last 6 Months</h2></div>
+  <canvas id="feeChart" height="160"></canvas>
+</div>
+
 <div class="btn-row">
   <a href="{{ url_for('attendance') }}" class="btn btn-primary">Mark Attendance</a>
   <a href="{{ url_for('student_new') }}" class="btn btn-outline">Add Student</a>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<script>
+const inkColor = '#1B3A4B';
+const sageColor = '#4C7A5D';
+const brickColor = '#C1503D';
+const marigoldColor = '#E2A63C';
+const gridColor = 'rgba(27,58,75,0.08)';
+
+Chart.defaults.font.family = "'Inter', sans-serif";
+Chart.defaults.color = inkColor;
+
+new Chart(document.getElementById('attendanceChart'), {
+  type: 'line',
+  data: {
+    labels: {{ attendance_labels|tojson }},
+    datasets: [
+      {
+        label: 'Present',
+        data: {{ attendance_present|tojson }},
+        borderColor: sageColor,
+        backgroundColor: 'rgba(76,122,93,0.12)',
+        tension: 0.3,
+        fill: true,
+        pointRadius: 3,
+      },
+      {
+        label: 'Absent',
+        data: {{ attendance_absent|tojson }},
+        borderColor: brickColor,
+        backgroundColor: 'rgba(193,80,61,0.08)',
+        tension: 0.3,
+        fill: true,
+        pointRadius: 3,
+      }
+    ]
+  },
+  options: {
+    responsive: true,
+    plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } } },
+    scales: {
+      x: { grid: { display: false }, ticks: { font: { size: 10 } } },
+      y: { beginAtZero: true, grid: { color: gridColor }, ticks: { precision: 0 } }
+    }
+  }
+});
+
+new Chart(document.getElementById('feeChart'), {
+  type: 'bar',
+  data: {
+    labels: {{ fee_labels|tojson }},
+    datasets: [
+      {
+        label: 'Due',
+        data: {{ fee_due|tojson }},
+        backgroundColor: 'rgba(27,58,75,0.18)',
+        borderRadius: 4,
+      },
+      {
+        label: 'Collected',
+        data: {{ fee_collected|tojson }},
+        backgroundColor: marigoldColor,
+        borderRadius: 4,
+      }
+    ]
+  },
+  options: {
+    responsive: true,
+    plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } } },
+    scales: {
+      x: { grid: { display: false }, ticks: { font: { size: 10 } } },
+      y: { beginAtZero: true, grid: { color: gridColor } }
+    }
+  }
+});
+</script>
 {% endblock %}

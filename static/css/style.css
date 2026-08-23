@@ -198,6 +198,49 @@ tr:last-child td { border-bottom: none; }
 
 .empty-state { text-align: center; padding: 40px 16px; color: var(--ink-60); }
 
+/* ---- Luxury polish pass ---- */
+.topbar {
+  border-bottom: 2px solid var(--marigold);
+}
+.card {
+  box-shadow: 0 3px 14px rgba(27, 58, 75, 0.07), 0 1px 3px rgba(27, 58, 75, 0.05);
+  transition: box-shadow 0.15s ease;
+}
+.card:hover { box-shadow: 0 6px 20px rgba(27, 58, 75, 0.1), 0 1px 3px rgba(27, 58, 75, 0.06); }
+.stat-card {
+  box-shadow: 0 2px 8px rgba(27, 58, 75, 0.06);
+  border-top: 3px solid var(--paper-line);
+}
+.stat-card.good { border-top-color: var(--sage); }
+.stat-card.warn { border-top-color: var(--brick); }
+.stat-card.accent { border-top-color: var(--marigold); }
+.stat-card .num { letter-spacing: -0.5px; }
+
+.btn-primary { box-shadow: 0 2px 8px rgba(27, 58, 75, 0.25); }
+.btn-marigold { box-shadow: 0 2px 8px rgba(226, 166, 60, 0.35); }
+.btn-primary, .btn-marigold, .btn-whatsapp { transition: transform 0.1s ease, box-shadow 0.1s ease; }
+.btn-primary:active, .btn-marigold:active, .btn-whatsapp:active { transform: scale(0.97); }
+
+.login-card { border-top: 4px solid var(--marigold); }
+
+h1.display, .page-head h1 { letter-spacing: -0.3px; }
+
+/* ---- Bulk actions & checkboxes ---- */
+.check-label {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 0.82rem; font-weight: 500; color: var(--ink-90);
+  margin: 0; cursor: pointer;
+}
+.check-label input[type="checkbox"] {
+  width: 18px; height: 18px; accent-color: var(--marigold); cursor: pointer; margin: 0;
+}
+.select-all-row { padding: 4px 4px; }
+.bulk-bar {
+  border: 1.5px solid var(--marigold);
+  background: #FFFBF2;
+}
+.fee-card { padding: 14px 16px; }
+
 @media (max-width: 420px) {
   .stat-grid { grid-template-columns: 1fr 1fr; }
 }

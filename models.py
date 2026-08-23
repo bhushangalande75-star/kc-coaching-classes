@@ -52,16 +52,21 @@ class Fee(db.Model):
     period = db.Column(db.String(20), nullable=False)   # e.g. "2026-08"
     amount_due = db.Column(db.Float, nullable=False, default=0)
     amount_paid = db.Column(db.Float, nullable=False, default=0)
-    status = db.Column(db.String(15), nullable=False, default="pending")  # pending / partial / paid
+    status = db.Column(db.String(15), nullable=False, default="pending")  # pending / partial / paid / waived
     paid_date = db.Column(db.Date, nullable=True)
     due_date = db.Column(db.Date, nullable=True)
+    note = db.Column(db.String(200), nullable=True)  # e.g. reason for waiver/discount
 
     __table_args__ = (db.UniqueConstraint("student_id", "period", name="uq_student_period"),)
 
     def balance(self):
+        if self.status == "waived":
+            return 0.0
         return round(self.amount_due - self.amount_paid, 2)
 
     def recompute_status(self):
+        if self.status == "waived":
+            return
         if self.amount_paid <= 0:
             self.status = "pending"
         elif self.amount_paid < self.amount_due:

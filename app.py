@@ -1,7 +1,9 @@
 import os
+import csv
+import io
 import calendar
 from datetime import date, datetime
-from flask import Flask, render_template, request, redirect, url_for, flash, send_file, jsonify
+from flask import Flask, render_template, request, redirect, url_for, flash, send_file, jsonify, Response
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from dotenv import load_dotenv
 
@@ -89,6 +91,35 @@ def dashboard():
         .all()
     )
 
+    # --- Analytics: last 14 days attendance trend ---
+    from datetime import timedelta
+    attendance_labels, attendance_present, attendance_absent = [], [], []
+    for i in range(13, -1, -1):
+        d = today - timedelta(days=i)
+        p = Attendance.query.filter_by(date=d, status="present").count()
+        a = Attendance.query.filter_by(date=d, status="absent").count()
+        attendance_labels.append(d.strftime("%d %b"))
+        attendance_present.append(p)
+        attendance_absent.append(a)
+
+    # --- Analytics: last 6 months fee collection ---
+    fee_labels, fee_due, fee_collected = [], [], []
+    y, m = today.year, today.month
+    months = []
+    for i in range(5, -1, -1):
+        mm = m - i
+        yy = y
+        while mm <= 0:
+            mm += 12
+            yy -= 1
+        months.append((yy, mm))
+    for yy, mm in months:
+        period_str = f"{yy:04d}-{mm:02d}"
+        month_fees = Fee.query.filter_by(period=period_str).all()
+        fee_labels.append(datetime(yy, mm, 1).strftime("%b %Y"))
+        fee_due.append(sum(f.amount_due for f in month_fees))
+        fee_collected.append(sum(f.amount_paid for f in month_fees))
+
     return render_template(
         "dashboard.html",
         total_students=total_students,
@@ -101,6 +132,12 @@ def dashboard():
         recent_pending=recent_pending,
         current_period=current_period,
         today=today,
+        attendance_labels=attendance_labels,
+        attendance_present=attendance_present,
+        attendance_absent=attendance_absent,
+        fee_labels=fee_labels,
+        fee_due=fee_due,
+        fee_collected=fee_collected,
     )
 
 
@@ -208,6 +245,30 @@ def attendance():
     )
 
 
+@app.route("/attendance/bulk", methods=["POST"])
+@login_required
+def attendance_bulk():
+    """Mark every student in a batch present or absent in one action."""
+    d = datetime.strptime(request.form["date"], "%Y-%m-%d").date()
+    status = request.form["status"]  # present / absent
+    batch_filter = request.form.get("batch", "")
+
+    q = Student.query.filter_by(active=True)
+    if batch_filter:
+        q = q.filter_by(batch=batch_filter)
+    all_students = q.all()
+
+    for s in all_students:
+        existing = Attendance.query.filter_by(student_id=s.id, date=d).first()
+        if existing:
+            existing.status = status
+        else:
+            db.session.add(Attendance(student_id=s.id, date=d, status=status))
+    db.session.commit()
+    flash(f"Marked {len(all_students)} students {status} for {d.strftime('%d-%b-%Y')}.", "success")
+    return redirect(url_for("attendance", batch=batch_filter, date=d.isoformat()))
+
+
 @app.route("/attendance/notify/<int:student_id>/<status>/<day>")
 @login_required
 def attendance_notify(student_id, status, day):
@@ -312,6 +373,91 @@ def fees_pay(fee_id):
     return redirect(url_for("fees", period=fee.period))
 
 
+@app.route("/fees/<int:fee_id>/edit-due", methods=["POST"])
+@login_required
+def fees_edit_due(fee_id):
+    """Adjust the amount due — for discounts, scholarships, or correcting a mistake."""
+    fee = db.get_or_404(Fee, fee_id)
+    fee.amount_due = float(request.form.get("amount_due") or 0)
+    note = request.form.get("note", "").strip()
+    if note:
+        fee.note = note
+    if fee.status != "waived":
+        fee.recompute_status()
+    db.session.commit()
+    flash("Fee amount updated.", "success")
+    return redirect(url_for("fees", period=fee.period))
+
+
+@app.route("/fees/<int:fee_id>/waive", methods=["POST"])
+@login_required
+def fees_waive(fee_id):
+    """Clear a pending/partial fee without a payment - scholarship, exemption, write-off."""
+    fee = db.get_or_404(Fee, fee_id)
+    fee.status = "waived"
+    note = request.form.get("note", "").strip()
+    if note:
+        fee.note = note
+    db.session.commit()
+    flash(f"Fee waived for {fee.student.name} — {fee.period}.", "success")
+    return redirect(url_for("fees", period=fee.period))
+
+
+@app.route("/fees/<int:fee_id>/unwaive", methods=["POST"])
+@login_required
+def fees_unwaive(fee_id):
+    """Revert a waived fee back to a normal pending/partial/paid entry."""
+    fee = db.get_or_404(Fee, fee_id)
+    fee.recompute_status()
+    db.session.commit()
+    flash("Waiver removed — fee restored to normal status.", "success")
+    return redirect(url_for("fees", period=fee.period))
+
+
+@app.route("/fees/<int:fee_id>/delete", methods=["POST"])
+@login_required
+def fees_delete(fee_id):
+    """Remove a fee entry entirely - e.g. generated by mistake."""
+    fee = db.get_or_404(Fee, fee_id)
+    period = fee.period
+    db.session.delete(fee)
+    db.session.commit()
+    flash("Fee entry deleted.", "success")
+    return redirect(url_for("fees", period=period))
+
+
+@app.route("/fees/<int:fee_id>/mark-paid", methods=["POST"])
+@login_required
+def fees_mark_paid(fee_id):
+    """One-tap: set amount paid = amount due, no manual entry needed."""
+    fee = db.get_or_404(Fee, fee_id)
+    fee.amount_paid = fee.amount_due
+    fee.status = "paid"
+    fee.paid_date = date.today()
+    db.session.commit()
+    flash(f"{fee.student.name}'s fee marked as fully paid.", "success")
+    return redirect(url_for("fees", period=fee.period))
+
+
+@app.route("/fees/bulk-pay", methods=["POST"])
+@login_required
+def fees_bulk_pay():
+    """Mark multiple selected fee entries as fully paid at once."""
+    fee_ids = request.form.getlist("fee_ids")
+    period = request.form.get("period", date.today().strftime("%Y-%m"))
+    count = 0
+    for fid in fee_ids:
+        fee = db.session.get(Fee, int(fid))
+        if fee:
+            fee.amount_paid = fee.amount_due
+            fee.status = "paid"
+            fee.paid_date = date.today()
+            count += 1
+    db.session.commit()
+    flash(f"Marked {count} fee entr{'y' if count == 1 else 'ies'} as paid.", "success")
+    return redirect(url_for("fees", period=period))
+
+
 @app.route("/fees/<int:fee_id>/remind")
 @login_required
 def fees_remind(fee_id):
@@ -356,6 +502,48 @@ def reports():
         period=period,
         total_due=total_due,
         total_collected=total_collected,
+    )
+
+
+@app.route("/reports/export.csv")
+@login_required
+def reports_export_csv():
+    """CSV export for attendance or fee reports, for the selected month."""
+    report_type = request.args.get("type", "fees")
+    period = request.args.get("period", date.today().strftime("%Y-%m"))
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+
+    if report_type == "attendance":
+        year, month = map(int, period.split("-"))
+        all_students = Student.query.filter_by(active=True).order_by(Student.batch, Student.name).all()
+        records = Attendance.query.filter(
+            db.extract("year", Attendance.date) == year,
+            db.extract("month", Attendance.date) == month,
+        ).all()
+        writer.writerow(["Student", "Batch", "Present", "Absent", "Attendance %"])
+        for s in all_students:
+            s_records = [r for r in records if r.student_id == s.id]
+            present = sum(1 for r in s_records if r.status == "present")
+            absent = sum(1 for r in s_records if r.status == "absent")
+            marked = present + absent
+            pct = round((present / marked) * 100, 1) if marked else 0
+            writer.writerow([s.name, s.batch, present, absent, pct])
+        filename = f"attendance_{period}.csv"
+    else:
+        fee_list = Fee.query.filter_by(period=period).join(Student).order_by(Student.batch, Student.name).all()
+        writer.writerow(["Student", "Batch", "Amount Due", "Amount Paid", "Balance", "Status", "Paid Date"])
+        for f in fee_list:
+            writer.writerow([
+                f.student.name, f.student.batch, f.amount_due, f.amount_paid,
+                f.balance(), f.status, f.paid_date.isoformat() if f.paid_date else "",
+            ])
+        filename = f"fees_{period}.csv"
+
+    return Response(
+        buf.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
 
 

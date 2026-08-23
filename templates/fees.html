@@ -29,37 +29,98 @@
 {% endif %}
 
 {% if fees %}
+
+<!-- Hidden form submitted by JS for bulk actions -->
+<form method="POST" action="{{ url_for('fees_bulk_pay') }}" id="bulkForm">
+  <input type="hidden" name="period" value="{{ period }}">
+  <div id="bulkIdsContainer"></div>
+</form>
+
+<div class="card bulk-bar" id="bulkBar" style="display:none; position:sticky; top:70px; z-index:10; border-color:var(--marigold);">
+  <div style="display:flex; align-items:center; justify-content:space-between;">
+    <span class="mono" style="font-size:0.8rem;"><span id="bulkCount">0</span> selected</span>
+    <button type="button" class="btn btn-marigold btn-sm" onclick="submitBulk()">Mark Selected Paid</button>
+  </div>
+</div>
+
+<div class="select-all-row" style="margin-bottom:8px;">
+  <label class="check-label"><input type="checkbox" id="selectAll" onclick="toggleAll(this)"> Select all unpaid on this page</label>
+</div>
+
 {% for f in fees %}
-<div class="card">
-  <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-    <div>
-      <div class="att-name">{{ f.student.name }}</div>
-      <div class="att-batch">{{ f.student.batch }}</div>
+<div class="card fee-card">
+  <div style="display:flex; gap:10px; align-items:flex-start;">
+    <label class="check-label" style="flex-shrink:0; margin-top:3px;">
+      <input type="checkbox" class="fee-checkbox" value="{{ f.id }}" onchange="updateBulkBar()" {{ 'disabled' if f.status == 'paid' }}>
+    </label>
+    <div style="flex:1; min-width:0;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+        <div>
+          <div class="att-name">{{ f.student.name }}</div>
+          <div class="att-batch">{{ f.student.batch }}</div>
+        </div>
+        <span class="badge badge-{{ f.status }}">{{ f.status }}</span>
+      </div>
+
+      <div style="display:flex; gap:16px; margin-top:10px; font-size:0.85rem;">
+        <div>Due: <strong>₹{{ '%.0f'|format(f.amount_due) }}</strong></div>
+        <div>Paid: <strong>₹{{ '%.0f'|format(f.amount_paid) }}</strong></div>
+        <div>Balance: <strong style="color:var(--brick);">₹{{ '%.0f'|format(f.balance()) }}</strong></div>
+      </div>
+
+      {% if f.status != 'paid' %}
+      <form method="POST" action="{{ url_for('fees_mark_paid', fee_id=f.id) }}" style="display:inline-block; margin-top:10px;">
+        <button type="submit" class="btn btn-marigold btn-sm">Mark Fully Paid</button>
+      </form>
+      {% endif %}
+
+      <form method="POST" action="{{ url_for('fees_pay', fee_id=f.id) }}" class="btn-row" style="margin-top:8px;">
+        <input type="number" step="0.01" name="amount_paid" value="{{ f.amount_paid }}" style="max-width:120px;" placeholder="Custom amount">
+        <button type="submit" class="btn btn-primary btn-sm">Update Paid</button>
+      </form>
+
+      <div class="btn-row" style="margin-top:8px;">
+        {% if f.status != 'paid' %}
+        <a href="{{ url_for('fees_remind', fee_id=f.id) }}" class="btn btn-whatsapp btn-sm">Remind on WhatsApp</a>
+        {% else %}
+        <a href="{{ url_for('fees_receipt_msg', fee_id=f.id) }}" class="btn btn-whatsapp btn-sm">Send Receipt Msg</a>
+        {% endif %}
+        <a href="{{ url_for('fees_receipt_pdf', fee_id=f.id) }}" target="_blank" class="btn btn-outline btn-sm">View Receipt PDF</a>
+      </div>
     </div>
-    <span class="badge badge-{{ f.status }}">{{ f.status }}</span>
-  </div>
-  <div style="display:flex; gap:16px; margin-top:10px; font-size:0.85rem;">
-    <div>Due: <strong>₹{{ '%.0f'|format(f.amount_due) }}</strong></div>
-    <div>Paid: <strong>₹{{ '%.0f'|format(f.amount_paid) }}</strong></div>
-    <div>Balance: <strong style="color:var(--brick);">₹{{ '%.0f'|format(f.balance()) }}</strong></div>
-  </div>
-
-  <form method="POST" action="{{ url_for('fees_pay', fee_id=f.id) }}" class="btn-row" style="margin-top:12px;">
-    <input type="number" step="0.01" name="amount_paid" value="{{ f.amount_paid }}" style="max-width:120px;">
-    <button type="submit" class="btn btn-primary btn-sm">Update Paid</button>
-  </form>
-
-  <div class="btn-row" style="margin-top:8px;">
-    {% if f.status != 'paid' %}
-    <a href="{{ url_for('fees_remind', fee_id=f.id) }}" class="btn btn-whatsapp btn-sm">Remind on WhatsApp</a>
-    {% else %}
-    <a href="{{ url_for('fees_receipt_msg', fee_id=f.id) }}" class="btn btn-whatsapp btn-sm">Send Receipt Msg</a>
-    {% endif %}
-    <a href="{{ url_for('fees_receipt_pdf', fee_id=f.id) }}" target="_blank" class="btn btn-outline btn-sm">View Receipt PDF</a>
   </div>
 </div>
 {% endfor %}
+
 {% else %}
 <div class="empty-state"><p>No fee entries for {{ period }} yet. Generate them above once students are added.</p></div>
 {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleAll(source) {
+  document.querySelectorAll('.fee-checkbox:not(:disabled)').forEach(cb => cb.checked = source.checked);
+  updateBulkBar();
+}
+function updateBulkBar() {
+  const checked = document.querySelectorAll('.fee-checkbox:checked').length;
+  document.getElementById('bulkCount').textContent = checked;
+  document.getElementById('bulkBar').style.display = checked > 0 ? 'block' : 'none';
+}
+function submitBulk() {
+  const container = document.getElementById('bulkIdsContainer');
+  container.innerHTML = '';
+  document.querySelectorAll('.fee-checkbox:checked').forEach(cb => {
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = 'fee_ids';
+    input.value = cb.value;
+    container.appendChild(input);
+  });
+  if (confirm('Mark all selected fees as fully paid?')) {
+    document.getElementById('bulkForm').submit();
+  }
+}
+</script>
 {% endblock %}

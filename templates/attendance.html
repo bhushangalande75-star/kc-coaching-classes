@@ -19,6 +19,26 @@
 <a href="{{ url_for('attendance_report') }}" class="btn btn-outline btn-sm" style="margin-bottom:14px;">View Monthly Report →</a>
 
 {% if students %}
+<!-- Bulk server-side actions: instantly mark the whole filtered batch, no per-student clicking -->
+<div class="card bulk-bar" style="margin-bottom:14px;">
+  <div class="section-title" style="margin-bottom:8px;"><h2 style="font-size:0.95rem;">Bulk Mark {{ 'for ' + batch_filter if batch_filter else '(all batches)' }}</h2></div>
+  <div class="btn-row">
+    <form method="POST" action="{{ url_for('attendance_bulk') }}" style="display:inline;" onsubmit="return confirm('Mark everyone {{ 'in ' + batch_filter if batch_filter else '(all students)' }} PRESENT for {{ selected_date }}?')">
+      <input type="hidden" name="date" value="{{ selected_date }}">
+      <input type="hidden" name="batch" value="{{ batch_filter }}">
+      <input type="hidden" name="status" value="present">
+      <button type="submit" class="btn btn-marigold btn-sm">✓ Mark All Present</button>
+    </form>
+    <form method="POST" action="{{ url_for('attendance_bulk') }}" style="display:inline;" onsubmit="return confirm('Mark everyone {{ 'in ' + batch_filter if batch_filter else '(all students)' }} ABSENT for {{ selected_date }}?')">
+      <input type="hidden" name="date" value="{{ selected_date }}">
+      <input type="hidden" name="batch" value="{{ batch_filter }}">
+      <input type="hidden" name="status" value="absent">
+      <button type="submit" class="btn btn-outline btn-sm" style="color:var(--brick); border-color:var(--brick);">Mark All Absent</button>
+    </form>
+  </div>
+  <p style="font-size:0.72rem; color:var(--ink-60); margin:8px 0 0;">Applies instantly to everyone shown below — use this for a full-attendance day, then adjust individual exceptions below if needed.</p>
+</div>
+
 <form method="POST">
   <input type="hidden" name="date" value="{{ selected_date }}">
   <div class="card" style="padding:6px 16px;">
@@ -40,7 +60,7 @@
     </div>
     {% endfor %}
   </div>
-  <button type="submit" class="btn btn-marigold btn-block" style="margin-top:14px;">Save Attendance</button>
+  <button type="submit" class="btn btn-marigold btn-block" style="margin-top:14px;">Save Individual Changes</button>
 </form>
 
 <div class="card" style="margin-top:16px;">
