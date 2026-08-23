@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if student else 'Add' }} Student{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="eyebrow">{{ 'Edit' if student else 'New' }}</div>
+  <h1>{{ 'Edit Student' if student else 'Add Student' }}</h1>
+</div>
+
+<form method="POST" class="card">
+  <label>Full Name</label>
+  <input type="text" name="name" required value="{{ student.name if student else '' }}">
+
+  <label>Batch / Class</label>
+  <input type="text" name="batch" required placeholder="e.g. 10th Science" value="{{ student.batch if student else '' }}">
+
+  <label>Parent Name</label>
+  <input type="text" name="parent_name" value="{{ student.parent_name if student else '' }}">
+
+  <label>Parent WhatsApp Number</label>
+  <input type="text" name="whatsapp_number" required placeholder="91XXXXXXXXXX (with country code, no + or spaces)"
+         value="{{ student.whatsapp_number if student else '' }}">
+
+  <label>Fee Amount (₹)</label>
+  <input type="number" step="0.01" name="fee_amount" required value="{{ student.fee_amount if student else '' }}">
+
+  <label>Fee Cycle</label>
+  <select name="fee_cycle">
+    <option value="monthly" {{ 'selected' if student and student.fee_cycle=='monthly' }}>Monthly</option>
+    <option value="one-time" {{ 'selected' if student and student.fee_cycle=='one-time' }}>One-time</option>
+  </select>
+
+  <div class="btn-row" style="margin-top:20px;">
+    <button type="submit" class="btn btn-marigold">Save</button>
+    <a href="{{ url_for('students') }}" class="btn btn-outline">Cancel</a>
+    {% if student %}
+    <button type="submit" formaction="{{ url_for('student_deactivate', student_id=student.id) }}"
+            class="btn btn-outline" style="margin-left:auto; color:var(--brick); border-color:var(--brick);"
+            onclick="return confirm('Deactivate {{ student.name }}? They will be hidden from active lists.')">
+      Deactivate
+    </button>
+    {% endif %}
+  </div>
+</form>
+{% endblock %}

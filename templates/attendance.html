@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Attendance - KC Coaching Classes{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="eyebrow">Daily Marking</div>
+  <h1>Attendance</h1>
+</div>
+
+<form method="GET" class="btn-row" style="margin-bottom:14px;">
+  <input type="date" name="date" value="{{ selected_date }}" onchange="this.form.submit()" style="flex:1;">
+  <select name="batch" onchange="this.form.submit()" style="flex:1;">
+    <option value="">All Batches</option>
+    {% for b in batches %}
+    <option value="{{ b }}" {{ 'selected' if b == batch_filter }}>{{ b }}</option>
+    {% endfor %}
+  </select>
+</form>
+
+<a href="{{ url_for('attendance_report') }}" class="btn btn-outline btn-sm" style="margin-bottom:14px;">View Monthly Report →</a>
+
+{% if students %}
+<form method="POST">
+  <input type="hidden" name="date" value="{{ selected_date }}">
+  <div class="card" style="padding:6px 16px;">
+    {% for s in students %}
+    <div class="att-row">
+      <div>
+        <div class="att-name">{{ s.name }}</div>
+        <div class="att-batch">{{ s.batch }}</div>
+      </div>
+      <input type="hidden" name="student_id" value="{{ s.id }}">
+      <div class="toggle-group">
+        <input type="radio" name="status_{{ s.id }}" id="p{{ s.id }}" value="present"
+               {{ 'checked' if existing_marks.get(s.id, 'present') == 'present' }}>
+        <label for="p{{ s.id }}" class="present-label">Present</label>
+        <input type="radio" name="status_{{ s.id }}" id="a{{ s.id }}" value="absent"
+               {{ 'checked' if existing_marks.get(s.id) == 'absent' }}>
+        <label for="a{{ s.id }}" class="absent-label">Absent</label>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  <button type="submit" class="btn btn-marigold btn-block" style="margin-top:14px;">Save Attendance</button>
+</form>
+
+<div class="card" style="margin-top:16px;">
+  <div class="section-title"><h2>Notify Parent</h2></div>
+  <p style="font-size:0.8rem; color:var(--ink-60); margin-top:0;">Send a WhatsApp alert for a specific student's status on this date.</p>
+  {% for s in students %}
+  <div class="att-row">
+    <div class="att-name" style="font-size:0.85rem;">{{ s.name }}</div>
+    <div class="btn-row">
+      <a href="{{ url_for('attendance_notify', student_id=s.id, status='absent', day=selected_date) }}" class="btn btn-whatsapp btn-sm">Notify</a>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+{% else %}
+<div class="empty-state"><p>No students found for this batch.</p></div>
+{% endif %}
+{% endblock %}

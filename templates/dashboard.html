@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - KC Coaching Classes{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="eyebrow">{{ today.strftime('%A, %d %b %Y') }}</div>
+  <h1>Today at a glance</h1>
+</div>
+
+<div class="stat-grid">
+  <div class="stat-card">
+    <div class="num">{{ total_students }}</div>
+    <div class="label">Active Students</div>
+  </div>
+  <div class="stat-card good">
+    <div class="num">{{ present_today }}</div>
+    <div class="label">Present Today</div>
+  </div>
+  <div class="stat-card warn">
+    <div class="num">{{ absent_today }}</div>
+    <div class="label">Absent Today</div>
+  </div>
+  <div class="stat-card">
+    <div class="num">{{ not_marked }}</div>
+    <div class="label">Not Marked Yet</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="section-title"><h2>Fees — {{ current_period }}</h2></div>
+  <div class="stat-grid" style="margin-bottom:0;">
+    <div class="stat-card accent">
+      <div class="num">₹{{ '%.0f'|format(total_collected) }}</div>
+      <div class="label">Collected</div>
+    </div>
+    <div class="stat-card warn">
+      <div class="num">{{ pending_count }}</div>
+      <div class="label">Pending / Partial</div>
+    </div>
+  </div>
+  <a href="{{ url_for('fees') }}" class="btn btn-outline btn-sm" style="margin-top:12px;">View all fees →</a>
+</div>
+
+{% if recent_pending %}
+<div class="card">
+  <div class="section-title"><h2>Needs Attention</h2></div>
+  {% for f in recent_pending %}
+  <div class="att-row">
+    <div>
+      <div class="att-name">{{ f.student.name }}</div>
+      <div class="att-batch">{{ f.student.batch }} · {{ f.period }} · Balance ₹{{ '%.0f'|format(f.balance()) }}</div>
+    </div>
+    <a href="{{ url_for('fees_remind', fee_id=f.id) }}" class="btn btn-whatsapp btn-sm">Remind</a>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="btn-row">
+  <a href="{{ url_for('attendance') }}" class="btn btn-primary">Mark Attendance</a>
+  <a href="{{ url_for('student_new') }}" class="btn btn-outline">Add Student</a>
+</div>
+{% endblock %}

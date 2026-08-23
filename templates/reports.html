@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Reports - KC Coaching Classes{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="eyebrow">Summary</div>
+  <h1>{{ 'Attendance Report' if report_type == 'attendance' else 'Fee Collection' }}</h1>
+</div>
+
+<div class="btn-row" style="margin-bottom:14px;">
+  <a href="{{ url_for('attendance_report', period=period) }}" class="btn {{ 'btn-primary' if report_type=='attendance' else 'btn-outline' }} btn-sm">Attendance</a>
+  <a href="{{ url_for('reports', period=period) }}" class="btn {{ 'btn-primary' if report_type=='fees' else 'btn-outline' }} btn-sm">Fee Collection</a>
+</div>
+
+<form method="GET" style="margin-bottom:14px;">
+  <input type="month" name="period" value="{{ period }}" onchange="this.form.submit()">
+</form>
+
+{% if report_type == 'attendance' %}
+  {% if summary %}
+  <div class="card" style="padding:0;">
+    <table>
+      <thead><tr><th>Student</th><th>Present</th><th>Absent</th><th>%</th></tr></thead>
+      <tbody>
+      {% for sid, row in summary.items() %}
+        <tr>
+          <td>{{ row.student.name }}<br><span style="color:var(--ink-60); font-size:0.75rem;">{{ row.student.batch }}</span></td>
+          <td>{{ row.present }}</td>
+          <td>{{ row.absent }}</td>
+          <td><strong>{{ row.pct }}%</strong></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state"><p>No attendance data for this month yet.</p></div>
+  {% endif %}
+
+{% else %}
+  <div class="stat-grid">
+    <div class="stat-card good"><div class="num">₹{{ '%.0f'|format(total_collected) }}</div><div class="label">Collected</div></div>
+    <div class="stat-card warn"><div class="num">₹{{ '%.0f'|format(total_due - total_collected) }}</div><div class="label">Outstanding</div></div>
+  </div>
+  {% if fee_list %}
+  <div class="card" style="padding:0;">
+    <table>
+      <thead><tr><th>Student</th><th>Due</th><th>Paid</th><th>Status</th></tr></thead>
+      <tbody>
+      {% for f in fee_list %}
+        <tr>
+          <td>{{ f.student.name }}</td>
+          <td>₹{{ '%.0f'|format(f.amount_due) }}</td>
+          <td>₹{{ '%.0f'|format(f.amount_paid) }}</td>
+          <td><span class="badge badge-{{ f.status }}">{{ f.status }}</span></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state"><p>No fee data for this month yet.</p></div>
+  {% endif %}
+{% endif %}
+{% endblock %}

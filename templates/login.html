@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Login - KC Coaching Classes{% endblock %}
+{% block content %}
+<div class="login-wrap">
+  <div class="login-card">
+    <div class="chalk-line"></div>
+    <h1 style="font-size:1.4rem;">KC Coaching Classes</h1>
+    <p style="color:var(--ink-60); font-size:0.85rem; margin:2px 0 0;">Attendance &amp; Fee Manager</p>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="flash flash-{{ category }}" style="margin-top:16px;">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <form method="POST" style="margin-top:8px;">
+      <label>Username</label>
+      <input type="text" name="username" required autofocus>
+      <label>Password</label>
+      <input type="password" name="password" required>
+      <button class="btn btn-marigold btn-block" style="margin-top:20px;" type="submit">Log In</button>
+    </form>
+    <p style="font-size:0.72rem; color:var(--ink-60); margin-top:16px;">
+      First time? Default login is <span class="mono">admin</span> / <span class="mono">changeme123</span> — change it right after logging in.
+    </p>
+  </div>
+</div>
+{% endblock %}

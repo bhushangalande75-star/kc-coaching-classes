@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Students - KC Coaching Classes{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="eyebrow">Roster</div>
+  <h1>Students</h1>
+</div>
+
+<div class="btn-row" style="margin-bottom:14px;">
+  <a href="{{ url_for('student_new') }}" class="btn btn-marigold">+ Add Student</a>
+</div>
+
+{% if batches %}
+<div style="margin-bottom:14px;">
+  <select onchange="window.location.href='{{ url_for('students') }}?batch='+this.value">
+    <option value="">All Batches</option>
+    {% for b in batches %}
+    <option value="{{ b }}" {{ 'selected' if b == batch_filter }}>{{ b }}</option>
+    {% endfor %}
+  </select>
+</div>
+{% endif %}
+
+{% if students %}
+<div class="card" style="padding:0;">
+  {% for s in students %}
+  <div class="att-row" style="padding:14px 16px;">
+    <a href="{{ url_for('student_edit', student_id=s.id) }}" style="color:var(--ink);">
+      <div class="att-name">{{ s.name }}</div>
+      <div class="att-batch">{{ s.batch }} · ₹{{ '%.0f'|format(s.fee_amount) }}/{{ s.fee_cycle }}</div>
+    </a>
+    <a href="https://wa.me/{{ s.whatsapp_number }}" target="_blank" class="btn btn-whatsapp btn-sm">Chat</a>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">
+  <p>No students yet. Add your first student to get started.</p>
+</div>
+{% endif %}
+{% endblock %}

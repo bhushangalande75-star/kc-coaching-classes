@@ -1,0 +1,14 @@
+{
+  "name": "KC Coaching Classes",
+  "short_name": "KC Coaching",
+  "description": "Attendance and fee manager for KC Coaching Classes",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FDFBF5",
+  "theme_color": "#1B3A4B",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
