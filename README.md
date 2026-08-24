@@ -30,6 +30,23 @@ Open **http://localhost:5000** in your browser.
 **First login:** username `admin`, password `changeme123`.
 Change this immediately — see "Changing the admin password" below.
 
+**Set up password recovery (do this once):** add an environment variable
+`ADMIN_RECOVERY_KEY` (any secret phrase you'll remember) — locally in a `.env` file,
+or on Render under Environment. If you ever forget your password, go to
+`/forgot-password` on the login page, enter this key plus a new password.
+Without this set, there's no way to recover a lost password except editing the
+database directly.
+
+**Auto-logout:** the app logs out automatically after 5 minutes of inactivity —
+this is a security measure since it's reachable from the public internet.
+
+**Batches:** before adding students, create at least one Batch (Students → Manage
+Batches → Add Batch). Students are assigned to a batch, which drives attendance
+marking, fee reports, and filtering throughout the app.
+
+**Phone numbers:** just enter the 10-digit mobile number — no country code needed.
+The app assumes India (+91) by default when building WhatsApp links.
+
 ## 2. Changing the admin password
 
 Run this once, from the project folder (with venv active):

@@ -2,15 +2,17 @@ import os
 import csv
 import io
 import calendar
-from datetime import date, datetime
-from flask import Flask, render_template, request, redirect, url_for, flash, send_file, jsonify, Response
+from datetime import date, datetime, timedelta
+from flask import Flask, render_template, request, redirect, url_for, flash, send_file, jsonify, Response, abort
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from dotenv import load_dotenv
+from itsdangerous import URLSafeSerializer, BadSignature
 
-from models import db, Admin, Student, Attendance, Fee
+from models import db, Admin, Student, Attendance, Fee, Batch, normalize_indian_mobile
 from utils import (
     whatsapp_link, fee_reminder_message, fee_receipt_message,
-    attendance_alert_message, generate_receipt_pdf
+    attendance_alert_message, attendance_share_message,
+    generate_receipt_pdf, generate_attendance_pdf,
 )
 
 load_dotenv()
@@ -32,16 +34,28 @@ if _db_url.startswith("sqlite"):
     os.makedirs(os.path.join(basedir, "instance"), exist_ok=True)
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
+# Auto-logout after 5 minutes of inactivity. Flask refreshes the session's expiry
+# on every request by default, so this is a true inactivity timer, not a fixed
+# time-since-login limit.
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(minutes=5)
+app.config["SESSION_REFRESH_EACH_REQUEST"] = True
+
 db.init_app(app)
 
 login_manager = LoginManager()
 login_manager.login_view = "login"
 login_manager.init_app(app)
 
+ADMIN_RECOVERY_KEY = os.environ.get("ADMIN_RECOVERY_KEY", "")
+
 
 @login_manager.user_loader
 def load_user(user_id):
     return db.session.get(Admin, int(user_id))
+
+
+def get_serializer():
+    return URLSafeSerializer(app.config["SECRET_KEY"], salt="attendance-share")
 
 
 # ---------- Auth ----------
@@ -55,7 +69,9 @@ def login():
         password = request.form.get("password", "")
         admin = Admin.query.filter_by(username=username).first()
         if admin and admin.check_password(password):
-            login_user(admin, remember=True)
+            from flask import session
+            session.permanent = True  # enables the 5-min inactivity timeout
+            login_user(admin, remember=False)  # no persistent cookie — inactivity timeout must apply
             return redirect(url_for("dashboard"))
         flash("Invalid username or password.", "error")
     return render_template("login.html")
@@ -66,6 +82,31 @@ def login():
 def logout():
     logout_user()
     return redirect(url_for("login"))
+
+
+@app.route("/forgot-password", methods=["GET", "POST"])
+def forgot_password():
+    if request.method == "POST":
+        recovery_key = request.form.get("recovery_key", "").strip()
+        new_password = request.form.get("new_password", "")
+        confirm_password = request.form.get("confirm_password", "")
+
+        if not ADMIN_RECOVERY_KEY:
+            flash("Password recovery isn't set up yet. Set the ADMIN_RECOVERY_KEY environment "
+                  "variable on your server first.", "error")
+        elif recovery_key != ADMIN_RECOVERY_KEY:
+            flash("Incorrect recovery key.", "error")
+        elif len(new_password) < 6:
+            flash("New password must be at least 6 characters.", "error")
+        elif new_password != confirm_password:
+            flash("Passwords don't match.", "error")
+        else:
+            admin = Admin.query.first()
+            admin.set_password(new_password)
+            db.session.commit()
+            flash("Password reset. You can log in now.", "success")
+            return redirect(url_for("login"))
+    return render_template("forgot_password.html")
 
 
 # ---------- Dashboard ----------
@@ -82,17 +123,16 @@ def dashboard():
     fees_this_month = Fee.query.filter_by(period=current_period).all()
     total_due = sum(f.amount_due for f in fees_this_month)
     total_collected = sum(f.amount_paid for f in fees_this_month)
-    pending_count = sum(1 for f in fees_this_month if f.status != "paid")
+    pending_count = sum(1 for f in fees_this_month if f.status not in ("paid", "waived"))
 
     recent_pending = (
-        Fee.query.filter(Fee.status != "paid")
+        Fee.query.filter(Fee.status.notin_(["paid", "waived"]))
         .order_by(Fee.due_date.asc().nullslast())
         .limit(8)
         .all()
     )
 
     # --- Analytics: last 14 days attendance trend ---
-    from datetime import timedelta
     attendance_labels, attendance_present, attendance_absent = [], [], []
     for i in range(13, -1, -1):
         d = today - timedelta(days=i)
@@ -141,29 +181,92 @@ def dashboard():
     )
 
 
+# ---------- Batches ----------
+
+@app.route("/batches")
+@login_required
+def batches():
+    all_batches = Batch.query.order_by(Batch.name).all()
+    return render_template("batches.html", batches=all_batches)
+
+
+@app.route("/batches/new", methods=["GET", "POST"])
+@login_required
+def batch_new():
+    if request.method == "POST":
+        name = request.form["name"].strip()
+        if Batch.query.filter_by(name=name).first():
+            flash(f"A batch named '{name}' already exists.", "error")
+            return render_template("batch_form.html", batch=None)
+        b = Batch(
+            name=name,
+            default_fee=float(request.form.get("default_fee") or 0) or None,
+        )
+        db.session.add(b)
+        db.session.commit()
+        flash(f"Batch '{b.name}' created.", "success")
+        return redirect(url_for("batches"))
+    return render_template("batch_form.html", batch=None)
+
+
+@app.route("/batches/<int:batch_id>/edit", methods=["GET", "POST"])
+@login_required
+def batch_edit(batch_id):
+    b = db.get_or_404(Batch, batch_id)
+    if request.method == "POST":
+        new_name = request.form["name"].strip()
+        clash = Batch.query.filter(Batch.name == new_name, Batch.id != b.id).first()
+        if clash:
+            flash(f"A batch named '{new_name}' already exists.", "error")
+            return render_template("batch_form.html", batch=b)
+        b.name = new_name
+        b.default_fee = float(request.form.get("default_fee") or 0) or None
+        db.session.commit()
+        flash(f"Batch updated.", "success")
+        return redirect(url_for("batches"))
+    return render_template("batch_form.html", batch=b)
+
+
+@app.route("/batches/<int:batch_id>/delete", methods=["POST"])
+@login_required
+def batch_delete(batch_id):
+    b = db.get_or_404(Batch, batch_id)
+    if b.active_student_count() > 0:
+        flash(f"Can't delete '{b.name}' — it still has students assigned. Reassign them first.", "error")
+        return redirect(url_for("batches"))
+    db.session.delete(b)
+    db.session.commit()
+    flash("Batch deleted.", "success")
+    return redirect(url_for("batches"))
+
+
 # ---------- Students ----------
 
 @app.route("/students")
 @login_required
 def students():
-    batch_filter = request.args.get("batch", "")
+    batch_filter = request.args.get("batch", "", type=str)
     q = Student.query.filter_by(active=True)
     if batch_filter:
-        q = q.filter_by(batch=batch_filter)
-    all_students = q.order_by(Student.batch, Student.name).all()
-    batches = sorted({s.batch for s in Student.query.filter_by(active=True).all()})
-    return render_template("students.html", students=all_students, batches=batches, batch_filter=batch_filter)
+        q = q.filter_by(batch_id=int(batch_filter))
+    all_students = q.join(Batch, isouter=True).order_by(Batch.name, Student.name).all()
+    all_batches = Batch.query.order_by(Batch.name).all()
+    return render_template("students.html", students=all_students, batches=all_batches, batch_filter=batch_filter)
 
 
 @app.route("/students/new", methods=["GET", "POST"])
 @login_required
 def student_new():
+    all_batches = Batch.query.order_by(Batch.name).all()
+    if not all_batches:
+        flash("Create a batch first before adding students.", "error")
+        return redirect(url_for("batch_new"))
     if request.method == "POST":
         s = Student(
             name=request.form["name"].strip(),
-            batch=request.form["batch"].strip(),
+            batch_id=int(request.form["batch_id"]),
             parent_name=request.form.get("parent_name", "").strip(),
-            whatsapp_number=request.form["whatsapp_number"].strip(),
+            whatsapp_number=normalize_indian_mobile(request.form["whatsapp_number"]),
             fee_amount=float(request.form.get("fee_amount") or 0),
             fee_cycle=request.form.get("fee_cycle", "monthly"),
         )
@@ -171,24 +274,25 @@ def student_new():
         db.session.commit()
         flash(f"{s.name} added.", "success")
         return redirect(url_for("students"))
-    return render_template("student_form.html", student=None)
+    return render_template("student_form.html", student=None, batches=all_batches)
 
 
 @app.route("/students/<int:student_id>/edit", methods=["GET", "POST"])
 @login_required
 def student_edit(student_id):
     s = db.get_or_404(Student, student_id)
+    all_batches = Batch.query.order_by(Batch.name).all()
     if request.method == "POST":
         s.name = request.form["name"].strip()
-        s.batch = request.form["batch"].strip()
+        s.batch_id = int(request.form["batch_id"])
         s.parent_name = request.form.get("parent_name", "").strip()
-        s.whatsapp_number = request.form["whatsapp_number"].strip()
+        s.whatsapp_number = normalize_indian_mobile(request.form["whatsapp_number"])
         s.fee_amount = float(request.form.get("fee_amount") or 0)
         s.fee_cycle = request.form.get("fee_cycle", "monthly")
         db.session.commit()
         flash(f"{s.name} updated.", "success")
         return redirect(url_for("students"))
-    return render_template("student_form.html", student=s)
+    return render_template("student_form.html", student=s, batches=all_batches)
 
 
 @app.route("/students/<int:student_id>/deactivate", methods=["POST"])
@@ -206,7 +310,7 @@ def student_deactivate(student_id):
 @app.route("/attendance", methods=["GET", "POST"])
 @login_required
 def attendance():
-    batch_filter = request.args.get("batch", "")
+    batch_filter = request.args.get("batch", "", type=str)
     selected_date = request.args.get("date", date.today().isoformat())
     d = datetime.strptime(selected_date, "%Y-%m-%d").date()
 
@@ -226,9 +330,9 @@ def attendance():
 
     q = Student.query.filter_by(active=True)
     if batch_filter:
-        q = q.filter_by(batch=batch_filter)
+        q = q.filter_by(batch_id=int(batch_filter))
     all_students = q.order_by(Student.name).all()
-    batches = sorted({s.batch for s in Student.query.filter_by(active=True).all()})
+    all_batches = Batch.query.order_by(Batch.name).all()
 
     existing_marks = {
         a.student_id: a.status
@@ -238,7 +342,7 @@ def attendance():
     return render_template(
         "attendance.html",
         students=all_students,
-        batches=batches,
+        batches=all_batches,
         batch_filter=batch_filter,
         selected_date=d.isoformat(),
         existing_marks=existing_marks,
@@ -255,7 +359,7 @@ def attendance_bulk():
 
     q = Student.query.filter_by(active=True)
     if batch_filter:
-        q = q.filter_by(batch=batch_filter)
+        q = q.filter_by(batch_id=int(batch_filter))
     all_students = q.all()
 
     for s in all_students:
@@ -275,7 +379,7 @@ def attendance_notify(student_id, status, day):
     s = db.get_or_404(Student, student_id)
     d = datetime.strptime(day, "%Y-%m-%d").date()
     msg = attendance_alert_message(s, status, d)
-    return redirect(whatsapp_link(s.whatsapp_number, msg))
+    return redirect(whatsapp_link(s.whatsapp_full(), msg))
 
 
 @app.route("/attendance/report")
@@ -285,7 +389,12 @@ def attendance_report():
     year, month = map(int, period.split("-"))
     days_in_month = calendar.monthrange(year, month)[1]
 
-    all_students = Student.query.filter_by(active=True).order_by(Student.batch, Student.name).all()
+    all_students = (
+        Student.query.filter_by(active=True)
+        .join(Batch, isouter=True)
+        .order_by(Batch.name, Student.name)
+        .all()
+    )
     records = Attendance.query.filter(
         db.extract("year", Attendance.date) == year,
         db.extract("month", Attendance.date) == month,
@@ -309,6 +418,44 @@ def attendance_report():
     )
 
 
+@app.route("/attendance/share/<int:student_id>")
+@login_required
+def attendance_share(student_id):
+    """Build a secure link to the student's attendance PDF and route straight
+    into a WhatsApp chat with their registered parent number, pre-filled."""
+    period = request.args.get("period", date.today().strftime("%Y-%m"))
+    s = db.get_or_404(Student, student_id)
+    token = get_serializer().dumps({"sid": s.id, "period": period})
+    share_link = url_for("shared_attendance_pdf", token=token, _external=True)
+    msg = attendance_share_message(s, period, share_link)
+    return redirect(whatsapp_link(s.whatsapp_full(), msg))
+
+
+@app.route("/share/attendance/<token>")
+def shared_attendance_pdf(token):
+    """Public (no login) — only reachable with a valid signed token, so a parent
+    can open the link from WhatsApp without needing an account."""
+    try:
+        data = get_serializer().loads(token)
+    except BadSignature:
+        abort(404)
+    s = db.get_or_404(Student, data["sid"])
+    period = data["period"]
+    year, month = map(int, period.split("-"))
+
+    records = (
+        Attendance.query.filter_by(student_id=s.id)
+        .filter(db.extract("year", Attendance.date) == year, db.extract("month", Attendance.date) == month)
+        .order_by(Attendance.date)
+        .all()
+    )
+    day_status = [(r.date, r.status) for r in records]
+
+    buf = generate_attendance_pdf(s, period, day_status)
+    filename = f"attendance_{s.name.replace(' ', '_')}_{period}.pdf"
+    return send_file(buf, mimetype="application/pdf", as_attachment=False, download_name=filename)
+
+
 # ---------- Fees ----------
 
 @app.route("/fees")
@@ -320,7 +467,7 @@ def fees():
     q = Fee.query.filter_by(period=period)
     if status_filter:
         q = q.filter_by(status=status_filter)
-    fee_list = q.join(Student).order_by(Student.batch, Student.name).all()
+    fee_list = q.join(Student).join(Batch, isouter=True).order_by(Batch.name, Student.name).all()
 
     students_without_fee = (
         Student.query.filter_by(active=True)
@@ -464,7 +611,7 @@ def fees_remind(fee_id):
     fee = db.get_or_404(Fee, fee_id)
     s = fee.student
     msg = fee_reminder_message(s, fee)
-    return redirect(whatsapp_link(s.whatsapp_number, msg))
+    return redirect(whatsapp_link(s.whatsapp_full(), msg))
 
 
 @app.route("/fees/<int:fee_id>/receipt-msg")
@@ -473,7 +620,7 @@ def fees_receipt_msg(fee_id):
     fee = db.get_or_404(Fee, fee_id)
     s = fee.student
     msg = fee_receipt_message(s, fee)
-    return redirect(whatsapp_link(s.whatsapp_number, msg))
+    return redirect(whatsapp_link(s.whatsapp_full(), msg))
 
 
 @app.route("/fees/<int:fee_id>/receipt.pdf")
@@ -492,7 +639,12 @@ def fees_receipt_pdf(fee_id):
 @login_required
 def reports():
     period = request.args.get("period", date.today().strftime("%Y-%m"))
-    fee_list = Fee.query.filter_by(period=period).join(Student).order_by(Student.batch, Student.name).all()
+    fee_list = (
+        Fee.query.filter_by(period=period)
+        .join(Student).join(Batch, isouter=True)
+        .order_by(Batch.name, Student.name)
+        .all()
+    )
     total_due = sum(f.amount_due for f in fee_list)
     total_collected = sum(f.amount_paid for f in fee_list)
     return render_template(
@@ -516,7 +668,12 @@ def reports_export_csv():
 
     if report_type == "attendance":
         year, month = map(int, period.split("-"))
-        all_students = Student.query.filter_by(active=True).order_by(Student.batch, Student.name).all()
+        all_students = (
+            Student.query.filter_by(active=True)
+            .join(Batch, isouter=True)
+            .order_by(Batch.name, Student.name)
+            .all()
+        )
         records = Attendance.query.filter(
             db.extract("year", Attendance.date) == year,
             db.extract("month", Attendance.date) == month,
@@ -528,14 +685,19 @@ def reports_export_csv():
             absent = sum(1 for r in s_records if r.status == "absent")
             marked = present + absent
             pct = round((present / marked) * 100, 1) if marked else 0
-            writer.writerow([s.name, s.batch, present, absent, pct])
+            writer.writerow([s.name, s.batch_name(), present, absent, pct])
         filename = f"attendance_{period}.csv"
     else:
-        fee_list = Fee.query.filter_by(period=period).join(Student).order_by(Student.batch, Student.name).all()
+        fee_list = (
+            Fee.query.filter_by(period=period)
+            .join(Student).join(Batch, isouter=True)
+            .order_by(Batch.name, Student.name)
+            .all()
+        )
         writer.writerow(["Student", "Batch", "Amount Due", "Amount Paid", "Balance", "Status", "Paid Date"])
         for f in fee_list:
             writer.writerow([
-                f.student.name, f.student.batch, f.amount_due, f.amount_paid,
+                f.student.name, f.student.batch_name(), f.amount_due, f.amount_paid,
                 f.balance(), f.status, f.paid_date.isoformat() if f.paid_date else "",
             ])
         filename = f"fees_{period}.csv"
@@ -589,7 +751,7 @@ def run_lightweight_migrations():
     inspector = inspect(db.engine)
     existing_tables = inspector.get_table_names()
 
-    for model in [Admin, Student, Attendance, Fee]:
+    for model in [Admin, Batch, Student, Attendance, Fee]:
         table_name = model.__tablename__
         if table_name not in existing_tables:
             continue  # brand-new table, db.create_all() already handled it
@@ -598,7 +760,6 @@ def run_lightweight_migrations():
             if column.name in existing_columns:
                 continue
             col_type = column.type.compile(dialect=db.engine.dialect)
-            nullable = "" if column.nullable else ""  # new columns are always added nullable first
             with db.engine.begin() as conn:
                 conn.execute(text(
                     f'ALTER TABLE "{table_name}" ADD COLUMN "{column.name}" {col_type}'
@@ -606,9 +767,50 @@ def run_lightweight_migrations():
             print(f"[migration] Added missing column {table_name}.{column.name}")
 
 
+def migrate_legacy_batches():
+    """
+    One-time backfill: students used to store batch as a free-text column.
+    If that old text column is still sitting in the database (from before batches
+    became a proper table), turn each distinct value into a real Batch row and
+    point students at it via the new batch_id column. Safe to run every startup —
+    it only touches rows where batch_id is still empty.
+    """
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(db.engine)
+    if "student" not in inspector.get_table_names():
+        return
+    existing_columns = {c["name"] for c in inspector.get_columns("student")}
+    if "batch" not in existing_columns:
+        return  # already migrated, or a fresh install with no legacy column
+
+    rows = db.session.execute(
+        text("SELECT DISTINCT batch FROM student WHERE batch_id IS NULL AND batch IS NOT NULL")
+    ).fetchall()
+
+    changed = False
+    for (batch_name,) in rows:
+        if not batch_name:
+            continue
+        existing = Batch.query.filter_by(name=batch_name).first()
+        if not existing:
+            existing = Batch(name=batch_name)
+            db.session.add(existing)
+            db.session.flush()
+        db.session.execute(
+            text("UPDATE student SET batch_id = :bid WHERE batch = :bname AND batch_id IS NULL"),
+            {"bid": existing.id, "bname": batch_name},
+        )
+        changed = True
+    if changed:
+        db.session.commit()
+        print("[migration] Legacy batch text values migrated to the Batch table")
+
+
 with app.app_context():
     db.create_all()
     run_lightweight_migrations()
+    migrate_legacy_batches()
     if not Admin.query.first():
         # First-run convenience default — change immediately after first login
         default_admin = Admin(username="admin")

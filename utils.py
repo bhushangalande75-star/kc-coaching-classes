@@ -54,6 +54,151 @@ def attendance_alert_message(student, status, day):
     )
 
 
+def attendance_share_message(student, period, link):
+    return (
+        f"Dear {student.parent_name or 'Parent'},\n"
+        f"Attendance report for {student.name} ({student.batch_name()}) — {period}, "
+        f"from {COACHING_NAME}.\n"
+        f"View / download here: {link}"
+    )
+
+
+def generate_attendance_pdf(student, period, records):
+    """Generate a branded A5 monthly attendance sheet for one student.
+    `records` is a list of (date, status) tuples for the month, sorted by date."""
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A5)
+    width, height = A5
+
+    present_count = sum(1 for _, s in records if s == "present")
+    absent_count = sum(1 for _, s in records if s == "absent")
+    marked = present_count + absent_count
+    pct = round((present_count / marked) * 100, 1) if marked else 0
+
+    # ---------- Outer border ----------
+    c.setStrokeColor(BRAND_PAPER_LINE)
+    c.setLineWidth(0.8)
+    c.rect(4 * mm, 4 * mm, width - 8 * mm, height - 8 * mm, fill=False, stroke=True)
+
+    # ---------- Header ----------
+    header_h = 30 * mm
+    c.setFillColor(BRAND_INK)
+    c.rect(4 * mm, height - 4 * mm - header_h, width - 8 * mm, header_h, fill=True, stroke=False)
+
+    cx, cy = 18 * mm, height - 4 * mm - header_h / 2
+    c.setFillColor(BRAND_MARIGOLD)
+    c.circle(cx, cy, 7 * mm, fill=True, stroke=False)
+    c.setFillColor(BRAND_INK)
+    c.setFont("Helvetica-Bold", 11)
+    c.drawCentredString(cx, cy - 3.2, "KC")
+
+    c.setFillColor(colors.white)
+    c.setFont("Helvetica-Bold", 15)
+    c.drawString(28 * mm, height - 4 * mm - 12 * mm, COACHING_NAME)
+    c.setFont("Helvetica", 8.5)
+    c.setFillColor(BRAND_MARIGOLD)
+    c.drawString(28 * mm, height - 4 * mm - 18 * mm, "ATTENDANCE REPORT")
+
+    c.setFillColor(colors.white)
+    c.setFont("Helvetica-Bold", 8)
+    c.drawRightString(width - 8 * mm, height - 4 * mm - 11 * mm, f"Period: {period}")
+    c.setFont("Helvetica", 8)
+    c.drawRightString(width - 8 * mm, height - 4 * mm - 16 * mm,
+                       f"Generated: {date.today().strftime('%d-%b-%Y')}")
+
+    c.setFillColor(BRAND_MARIGOLD)
+    c.rect(4 * mm, height - 4 * mm - header_h - 1.2 * mm, width - 8 * mm, 1.2 * mm, fill=True, stroke=False)
+
+    y = height - 4 * mm - header_h - 12 * mm
+
+    # ---------- Student info ----------
+    c.setFillColor(BRAND_MUTED)
+    c.setFont("Helvetica-Bold", 7.5)
+    c.drawString(10 * mm, y, "STUDENT")
+    c.drawString(width / 2 + 4 * mm, y, "BATCH")
+    y -= 5 * mm
+    c.setFillColor(BRAND_TEXT)
+    c.setFont("Helvetica-Bold", 10.5)
+    c.drawString(10 * mm, y, student.name)
+    c.drawString(width / 2 + 4 * mm, y, student.batch_name())
+    y -= 9 * mm
+
+    # ---------- Summary stat boxes ----------
+    box_w = (width - 20 * mm - 8 * mm) / 3
+    box_h = 16 * mm
+    stats = [("Present", present_count, BRAND_SAGE), ("Absent", absent_count, BRAND_BRICK), ("Attendance", f"{pct}%", BRAND_MARIGOLD)]
+    bx = 10 * mm
+    for label, value, col in stats:
+        c.setStrokeColor(BRAND_PAPER_LINE)
+        c.setLineWidth(0.6)
+        c.rect(bx, y - box_h, box_w, box_h, fill=False, stroke=True)
+        c.setFillColor(col)
+        c.rect(bx, y - box_h, box_w, 1.4 * mm, fill=True, stroke=False)
+        c.setFillColor(BRAND_TEXT)
+        c.setFont("Helvetica-Bold", 13)
+        c.drawCentredString(bx + box_w / 2, y - box_h / 2 - 1, str(value))
+        c.setFillColor(BRAND_MUTED)
+        c.setFont("Helvetica", 6.8)
+        c.drawCentredString(bx + box_w / 2, y - box_h + 3 * mm, label.upper())
+        bx += box_w + 4 * mm
+
+    y -= box_h + 8 * mm
+
+    # ---------- Day-by-day table ----------
+    table_x = 10 * mm
+    table_w = width - 20 * mm
+    row_h = 6.2 * mm
+    c.setFillColor(BRAND_INK)
+    c.rect(table_x, y - row_h, table_w, row_h, fill=True, stroke=False)
+    c.setFillColor(colors.white)
+    c.setFont("Helvetica-Bold", 7.5)
+    c.drawString(table_x + 3 * mm, y - row_h + 2.2 * mm, "DATE")
+    c.drawRightString(table_x + table_w - 3 * mm, y - row_h + 2.2 * mm, "STATUS")
+    y -= row_h
+
+    max_rows_per_col = 18
+    col_w = table_w / 2
+    start_y = y
+    col_x = table_x
+
+    for i, (d, status) in enumerate(records):
+        if i > 0 and i % max_rows_per_col == 0:
+            col_x += col_w
+            y = start_y
+        row_color = colors.HexColor("#E7F0E9") if status == "present" else colors.HexColor("#F7E7E3")
+        c.setFillColor(row_color)
+        c.rect(col_x, y - row_h, col_w - 2 * mm, row_h, fill=True, stroke=False)
+        c.setStrokeColor(BRAND_PAPER_LINE)
+        c.setLineWidth(0.3)
+        c.line(col_x, y - row_h, col_x + col_w - 2 * mm, y - row_h)
+        c.setFillColor(BRAND_TEXT)
+        c.setFont("Helvetica", 7.5)
+        c.drawString(col_x + 2 * mm, y - row_h + 2 * mm, d.strftime("%d %b (%a)"))
+        c.setFillColor(BRAND_SAGE if status == "present" else BRAND_BRICK)
+        c.setFont("Helvetica-Bold", 7.5)
+        c.drawRightString(col_x + col_w - 4 * mm, y - row_h + 2 * mm, status.upper())
+        y -= row_h
+
+    if not records:
+        c.setFillColor(BRAND_MUTED)
+        c.setFont("Helvetica-Oblique", 8.5)
+        c.drawCentredString(width / 2, y - 6 * mm, "No attendance marked for this period yet.")
+
+    # ---------- Footer ----------
+    footer_y = 14 * mm
+    c.setStrokeColor(BRAND_PAPER_LINE)
+    c.setLineWidth(0.6)
+    c.line(10 * mm, footer_y + 6 * mm, width - 10 * mm, footer_y + 6 * mm)
+    c.setFont("Helvetica", 6.5)
+    c.setFillColor(BRAND_MUTED)
+    c.drawCentredString(width / 2, footer_y, "This is a computer-generated attendance report.")
+
+    c.showPage()
+    c.save()
+    buf.seek(0)
+    return buf
+
+
 def generate_receipt_pdf(student, fee):
     """Generate a professional A5 fee receipt PDF (invoice-style) and return bytes."""
     buf = io.BytesIO()
@@ -118,7 +263,7 @@ def generate_receipt_pdf(student, fee):
 
     c.setFont("Helvetica", 8.5)
     c.setFillColor(BRAND_MUTED)
-    c.drawString(col1_x, y, f"Batch: {student.batch}")
+    c.drawString(col1_x, y, f"Batch: {student.batch_name()}")
     due_str = fee.due_date.strftime('%d-%b-%Y') if fee.due_date else '-'
     c.drawString(col2_x, y, f"Due Date: {due_str}")
     y -= 4.6 * mm

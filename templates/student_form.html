@@ -10,15 +10,25 @@
   <label>Full Name</label>
   <input type="text" name="name" required value="{{ student.name if student else '' }}">
 
-  <label>Batch / Class</label>
-  <input type="text" name="batch" required placeholder="e.g. 10th Science" value="{{ student.batch if student else '' }}">
+  <label>Batch</label>
+  <select name="batch_id" required>
+    {% for b in batches %}
+    <option value="{{ b.id }}" {{ 'selected' if student and student.batch_id == b.id }}>{{ b.name }}</option>
+    {% endfor %}
+  </select>
+  <div style="margin-top:6px;"><a href="{{ url_for('batches') }}" style="font-size:0.78rem; color:var(--ink-60);">+ Manage batches</a></div>
 
   <label>Parent Name</label>
   <input type="text" name="parent_name" value="{{ student.parent_name if student else '' }}">
 
-  <label>Parent WhatsApp Number</label>
-  <input type="text" name="whatsapp_number" required placeholder="91XXXXXXXXXX (with country code, no + or spaces)"
-         value="{{ student.whatsapp_number if student else '' }}">
+  <label>Parent Mobile Number</label>
+  <div style="display:flex; align-items:center; gap:8px;">
+    <span class="mono" style="padding:10px 12px; background:var(--paper-line); border-radius:8px; font-size:0.9rem; color:var(--ink-90);">+91</span>
+    <input type="text" name="whatsapp_number" required pattern="[0-9]{10}" maxlength="10" inputmode="numeric"
+           placeholder="10-digit mobile number" style="flex:1;"
+           value="{{ student.whatsapp_number if student else '' }}">
+  </div>
+  <div style="margin-top:4px; font-size:0.72rem; color:var(--ink-60);">India numbers only — just the 10 digits, no country code needed.</div>
 
   <label>Fee Amount (₹)</label>
   <input type="number" step="0.01" name="fee_amount" required value="{{ student.fee_amount if student else '' }}">

@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Batches - KC Coaching Classes{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="eyebrow">Class Management</div>
+  <h1>Batches</h1>
+</div>
+
+<div class="btn-row" style="margin-bottom:14px;">
+  <a href="{{ url_for('batch_new') }}" class="btn btn-marigold">+ Add Batch</a>
+  <a href="{{ url_for('students') }}" class="btn btn-outline">← Back to Students</a>
+</div>
+
+{% if batches %}
+<div class="card" style="padding:0;">
+  {% for b in batches %}
+  <div class="att-row" style="padding:14px 16px;">
+    <a href="{{ url_for('batch_edit', batch_id=b.id) }}" style="color:var(--ink);">
+      <div class="att-name">{{ b.name }}</div>
+      <div class="att-batch">{{ b.active_student_count() }} student{{ 's' if b.active_student_count() != 1 }}{% if b.default_fee %} · Default fee ₹{{ '%.0f'|format(b.default_fee) }}{% endif %}</div>
+    </a>
+    <form method="POST" action="{{ url_for('batch_delete', batch_id=b.id) }}" onsubmit="return confirm('Delete batch {{ b.name }}?')">
+      <button type="submit" class="btn btn-outline btn-sm" style="color:var(--brick); border-color:var(--brick);">Delete</button>
+    </form>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">
+  <p>No batches yet. Create your first batch (e.g. "10th Science") before adding students.</p>
+</div>
+{% endif %}
+{% endblock %}

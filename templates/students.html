@@ -8,6 +8,7 @@
 
 <div class="btn-row" style="margin-bottom:14px;">
   <a href="{{ url_for('student_new') }}" class="btn btn-marigold">+ Add Student</a>
+  <a href="{{ url_for('batches') }}" class="btn btn-outline">Manage Batches</a>
 </div>
 
 {% if batches %}
@@ -15,7 +16,7 @@
   <select onchange="window.location.href='{{ url_for('students') }}?batch='+this.value">
     <option value="">All Batches</option>
     {% for b in batches %}
-    <option value="{{ b }}" {{ 'selected' if b == batch_filter }}>{{ b }}</option>
+    <option value="{{ b.id }}" {{ 'selected' if batch_filter == b.id|string }}>{{ b.name }}</option>
     {% endfor %}
   </select>
 </div>
@@ -27,9 +28,9 @@
   <div class="att-row" style="padding:14px 16px;">
     <a href="{{ url_for('student_edit', student_id=s.id) }}" style="color:var(--ink);">
       <div class="att-name">{{ s.name }}</div>
-      <div class="att-batch">{{ s.batch }} · ₹{{ '%.0f'|format(s.fee_amount) }}/{{ s.fee_cycle }}</div>
+      <div class="att-batch">{{ s.batch_name() }} · ₹{{ '%.0f'|format(s.fee_amount) }}/{{ s.fee_cycle }}</div>
     </a>
-    <a href="https://wa.me/{{ s.whatsapp_number }}" target="_blank" class="btn btn-whatsapp btn-sm">Chat</a>
+    <a href="https://wa.me/{{ s.whatsapp_full() }}" target="_blank" class="btn btn-whatsapp btn-sm">Chat</a>
   </div>
   {% endfor %}
 </div>

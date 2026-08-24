@@ -19,14 +19,15 @@
   {% if summary %}
   <div class="card" style="padding:0;">
     <table>
-      <thead><tr><th>Student</th><th>Present</th><th>Absent</th><th>%</th></tr></thead>
+      <thead><tr><th>Student</th><th>Present</th><th>Absent</th><th>%</th><th></th></tr></thead>
       <tbody>
       {% for sid, row in summary.items() %}
         <tr>
-          <td>{{ row.student.name }}<br><span style="color:var(--ink-60); font-size:0.75rem;">{{ row.student.batch }}</span></td>
+          <td>{{ row.student.name }}<br><span style="color:var(--ink-60); font-size:0.75rem;">{{ row.student.batch_name() }}</span></td>
           <td>{{ row.present }}</td>
           <td>{{ row.absent }}</td>
           <td><strong>{{ row.pct }}%</strong></td>
+          <td><a href="{{ url_for('attendance_share', student_id=row.student.id, period=period) }}" class="btn btn-whatsapp btn-sm">Share</a></td>
         </tr>
       {% endfor %}
       </tbody>

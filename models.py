@@ -6,6 +6,16 @@ from werkzeug.security import generate_password_hash, check_password_hash
 db = SQLAlchemy()
 
 
+def normalize_indian_mobile(raw):
+    """Strip everything to digits, drop a leading 91 if present, keep the last 10 digits.
+    Storage is always the bare 10-digit number - country code is applied only when
+    building a wa.me link, since this app is India-only by default."""
+    digits = "".join(ch for ch in str(raw or "") if ch.isdigit())
+    if digits.startswith("91") and len(digits) == 12:
+        digits = digits[2:]
+    return digits[-10:] if len(digits) >= 10 else digits
+
+
 class Admin(UserMixin, db.Model):
     """Single teacher/admin login for KC Coaching Classes."""
     id = db.Column(db.Integer, primary_key=True)
@@ -19,12 +29,25 @@ class Admin(UserMixin, db.Model):
         return check_password_hash(self.password_hash, password)
 
 
+class Batch(db.Model):
+    """A class/batch (e.g. '10th Science', 'Sr Kg'). Students are allocated to one."""
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(80), unique=True, nullable=False)
+    default_fee = db.Column(db.Float, nullable=True)
+    created_date = db.Column(db.Date, default=date.today)
+
+    students = db.relationship("Student", backref="batch", lazy="dynamic")
+
+    def active_student_count(self):
+        return self.students.filter_by(active=True).count()
+
+
 class Student(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(120), nullable=False)
-    batch = db.Column(db.String(80), nullable=False)          # e.g. "10th Science", "Batch A"
+    batch_id = db.Column(db.Integer, db.ForeignKey("batch.id"), nullable=True)
     parent_name = db.Column(db.String(120))
-    whatsapp_number = db.Column(db.String(20), nullable=False)  # digits with country code, e.g. 91XXXXXXXXXX
+    whatsapp_number = db.Column(db.String(10), nullable=False)  # bare 10-digit number, no country code
     fee_amount = db.Column(db.Float, nullable=False, default=0)
     fee_cycle = db.Column(db.String(20), nullable=False, default="monthly")  # monthly / one-time
     join_date = db.Column(db.Date, default=date.today)
@@ -33,8 +56,12 @@ class Student(db.Model):
     attendances = db.relationship("Attendance", backref="student", cascade="all, delete-orphan")
     fees = db.relationship("Fee", backref="student", cascade="all, delete-orphan")
 
-    def whatsapp_link(self):
-        return f"+{self.whatsapp_number}" if not self.whatsapp_number.startswith("+") else self.whatsapp_number
+    def whatsapp_full(self):
+        """Full number with India's country code, ready for a wa.me link."""
+        return "91" + normalize_indian_mobile(self.whatsapp_number)
+
+    def batch_name(self):
+        return self.batch.name if self.batch else "Unassigned"
 
 
 class Attendance(db.Model):

@@ -47,7 +47,7 @@
   <div class="att-row">
     <div>
       <div class="att-name">{{ f.student.name }}</div>
-      <div class="att-batch">{{ f.student.batch }} · {{ f.period }} · Balance ₹{{ '%.0f'|format(f.balance()) }}</div>
+      <div class="att-batch">{{ f.student.batch_name() }} · {{ f.period }} · Balance ₹{{ '%.0f'|format(f.balance()) }}</div>
     </div>
     <a href="{{ url_for('fees_remind', fee_id=f.id) }}" class="btn btn-whatsapp btn-sm">Remind</a>
   </div>

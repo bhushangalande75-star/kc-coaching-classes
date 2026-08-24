@@ -12,3 +12,5 @@ services:
         generateValue: true
       - key: DATABASE_URL
         sync: false
+      - key: ADMIN_RECOVERY_KEY
+        sync: false

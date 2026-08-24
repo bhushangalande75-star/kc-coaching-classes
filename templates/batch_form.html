@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if batch else 'Add' }} Batch{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="eyebrow">{{ 'Edit' if batch else 'New' }}</div>
+  <h1>{{ 'Edit Batch' if batch else 'Add Batch' }}</h1>
+</div>
+
+<form method="POST" class="card">
+  <label>Batch Name</label>
+  <input type="text" name="name" required placeholder="e.g. 10th Science, Sr Kg" value="{{ batch.name if batch else '' }}">
+
+  <label>Default Fee (₹) — optional</label>
+  <input type="number" step="0.01" name="default_fee" placeholder="Auto-fills fee amount for new students in this batch"
+         value="{{ batch.default_fee if batch and batch.default_fee else '' }}">
+
+  <div class="btn-row" style="margin-top:20px;">
+    <button type="submit" class="btn btn-marigold">Save</button>
+    <a href="{{ url_for('batches') }}" class="btn btn-outline">Cancel</a>
+  </div>
+</form>
+{% endblock %}

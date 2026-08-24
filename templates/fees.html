@@ -57,7 +57,7 @@
       <div style="display:flex; justify-content:space-between; align-items:flex-start;">
         <div>
           <div class="att-name">{{ f.student.name }}</div>
-          <div class="att-batch">{{ f.student.batch }}</div>
+          <div class="att-batch">{{ f.student.batch_name() }}</div>
         </div>
         <span class="badge badge-{{ f.status }}">{{ f.status }}</span>
       </div>
