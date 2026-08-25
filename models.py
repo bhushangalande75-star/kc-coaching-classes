@@ -64,6 +64,32 @@ class Student(db.Model):
         return self.batch.name if self.batch else "Unassigned"
 
 
+class DateOverride(db.Model):
+    """Explicit holiday/working-day override for a specific date. Sunday is a
+    holiday by default without needing a row here — this table only stores
+    exceptions: an ad-hoc holiday on a normal day, or tuition held on a Sunday."""
+    id = db.Column(db.Integer, primary_key=True)
+    date = db.Column(db.Date, unique=True, nullable=False)
+    status = db.Column(db.String(10), nullable=False)  # 'holiday' or 'working'
+    reason = db.Column(db.String(200), nullable=True)
+
+    @staticmethod
+    def is_holiday(d):
+        override = DateOverride.query.filter_by(date=d).first()
+        if override:
+            return override.status == "holiday"
+        return d.weekday() == 6  # Sunday, default holiday
+
+    @staticmethod
+    def get_reason(d):
+        override = DateOverride.query.filter_by(date=d).first()
+        if override and override.reason:
+            return override.reason
+        if d.weekday() == 6:
+            return "Sunday"
+        return None
+
+
 class Attendance(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     student_id = db.Column(db.Integer, db.ForeignKey("student.id"), nullable=False)

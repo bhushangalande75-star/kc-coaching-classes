@@ -8,7 +8,7 @@ from flask_login import LoginManager, login_user, logout_user, login_required, c
 from dotenv import load_dotenv
 from itsdangerous import URLSafeSerializer, BadSignature
 
-from models import db, Admin, Student, Attendance, Fee, Batch, normalize_indian_mobile
+from models import db, Admin, Student, Attendance, Fee, Batch, DateOverride, normalize_indian_mobile
 from utils import (
     whatsapp_link, fee_reminder_message, fee_receipt_message,
     attendance_alert_message, attendance_share_message,
@@ -383,6 +383,9 @@ def attendance():
 
     if request.method == "POST":
         d = datetime.strptime(request.form["date"], "%Y-%m-%d").date()
+        if DateOverride.is_holiday(d):
+            flash("That date is marked as a holiday. Mark it as a working day first if tuition was held.", "error")
+            return redirect(url_for("attendance", batch=batch_filter, date=d.isoformat()))
         student_ids = request.form.getlist("student_id")
         for sid in student_ids:
             status = request.form.get(f"status_{sid}", "present")
@@ -406,6 +409,12 @@ def attendance():
         for a in Attendance.query.filter_by(date=d).all()
     }
 
+    is_sunday = d.weekday() == 6
+    override = DateOverride.query.filter_by(date=d).first()
+    is_holiday_today = DateOverride.is_holiday(d)
+    holiday_reason = DateOverride.get_reason(d)
+    is_override = override is not None
+
     return render_template(
         "attendance.html",
         students=all_students,
@@ -413,7 +422,37 @@ def attendance():
         batch_filter=batch_filter,
         selected_date=d.isoformat(),
         existing_marks=existing_marks,
+        is_sunday=is_sunday,
+        is_holiday_today=is_holiday_today,
+        holiday_reason=holiday_reason,
+        is_override=is_override,
     )
+
+
+@app.route("/attendance/set-day-status", methods=["POST"])
+@login_required
+def attendance_set_day_status():
+    """Declare a specific date a holiday, or override the default (e.g. hold
+    tuition on a Sunday, or cancel class on an otherwise normal day)."""
+    d = datetime.strptime(request.form["date"], "%Y-%m-%d").date()
+    action = request.form["action"]  # 'holiday' or 'working'
+    reason = request.form.get("reason", "").strip()
+    batch_filter = request.form.get("batch", "")
+
+    existing = DateOverride.query.filter_by(date=d).first()
+    if existing:
+        existing.status = action
+        if reason:
+            existing.reason = reason
+    else:
+        db.session.add(DateOverride(date=d, status=action, reason=reason or None))
+    db.session.commit()
+
+    if action == "working":
+        flash(f"{d.strftime('%d-%b-%Y')} marked as a working day — attendance can now be taken.", "success")
+    else:
+        flash(f"{d.strftime('%d-%b-%Y')} marked as a holiday.", "success")
+    return redirect(url_for("attendance", batch=batch_filter, date=d.isoformat()))
 
 
 @app.route("/attendance/bulk", methods=["POST"])
@@ -423,6 +462,10 @@ def attendance_bulk():
     d = datetime.strptime(request.form["date"], "%Y-%m-%d").date()
     status = request.form["status"]  # present / absent
     batch_filter = request.form.get("batch", "")
+
+    if DateOverride.is_holiday(d):
+        flash("That date is marked as a holiday. Mark it as a working day first if tuition was held.", "error")
+        return redirect(url_for("attendance", batch=batch_filter, date=d.isoformat()))
 
     q = Student.query.filter_by(active=True)
     if batch_filter:
@@ -893,7 +936,7 @@ def run_lightweight_migrations():
     inspector = inspect(db.engine)
     existing_tables = inspector.get_table_names()
 
-    for model in [Admin, Batch, Student, Attendance, Fee]:
+    for model in [Admin, Batch, Student, Attendance, Fee, DateOverride]:
         table_name = model.__tablename__
         if table_name not in existing_tables:
             continue  # brand-new table, db.create_all() already handled it

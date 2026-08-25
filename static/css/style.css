@@ -266,6 +266,23 @@ h1.display, .page-head h1 { letter-spacing: -0.3px; }
   border-bottom: 2px solid var(--marigold);
 }
 
+/* ---- Holiday banner ---- */
+.holiday-banner {
+  background: linear-gradient(135deg, #FFF8E8, #FBEFD8);
+  border: 1.5px solid var(--marigold);
+  border-radius: var(--radius);
+  padding: 18px 16px;
+  text-align: center;
+}
+.holiday-banner .icon { font-size: 1.8rem; margin-bottom: 6px; }
+.holiday-banner h3 { font-size: 1.05rem; margin: 0 0 4px; }
+.holiday-banner p { font-size: 0.82rem; color: var(--ink-60); margin: 0 0 14px; }
+.working-override-note {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: var(--sage-bg); color: var(--sage); border-radius: 8px;
+  padding: 8px 12px; font-size: 0.78rem; margin-bottom: 14px;
+}
+
 @media (max-width: 420px) {
   .stat-grid { grid-template-columns: 1fr 1fr; }
 }

@@ -18,9 +18,39 @@
 
 <a href="{{ url_for('attendance_report') }}" class="btn btn-outline btn-sm" style="margin-bottom:14px;">View Monthly Report →</a>
 
-{% if not batches %}
+{% if is_holiday_today %}
+<!-- Holiday: hide the attendance grid entirely, offer an override if class was actually held -->
+<div class="holiday-banner">
+  <div class="icon">🌙</div>
+  <h3>{{ holiday_reason or 'Holiday' }}</h3>
+  <p>No attendance is expected on this date{% if holiday_reason == 'Sunday' %} (default weekly off){% endif %}.</p>
+  <form method="POST" action="{{ url_for('attendance_set_day_status') }}">
+    <input type="hidden" name="date" value="{{ selected_date }}">
+    <input type="hidden" name="batch" value="{{ batch_filter }}">
+    <input type="hidden" name="action" value="working">
+    <input type="text" name="reason" placeholder="Reason (e.g. Makeup class, exam prep)" style="margin-bottom:10px;">
+    <button type="submit" class="btn btn-marigold">Tuition Held Today — Mark as Working Day</button>
+  </form>
+</div>
+
+{% elif not batches %}
 <div class="empty-state"><p>No batches yet. <a href="{{ url_for('batch_new') }}">Create a batch</a> first.</p></div>
-{% elif students %}
+
+{% else %}
+
+{% if is_sunday and is_override %}
+<div class="working-override-note">
+  <span>☀️ Working day override — tuition held despite it being a Sunday.</span>
+  <form method="POST" action="{{ url_for('attendance_set_day_status') }}" style="display:inline;">
+    <input type="hidden" name="date" value="{{ selected_date }}">
+    <input type="hidden" name="batch" value="{{ batch_filter }}">
+    <input type="hidden" name="action" value="holiday">
+    <button type="submit" class="btn btn-outline btn-sm" style="color:var(--sage); border-color:var(--sage);">Revert to Holiday</button>
+  </form>
+</div>
+{% endif %}
+
+{% if students %}
 {% set batch_label = (batches|selectattr('id', 'equalto', batch_filter|int(0))|first).name if batch_filter else 'all batches' %}
 <!-- Bulk server-side actions: instantly mark the whole filtered batch, no per-student clicking -->
 <div class="card bulk-bar" style="margin-bottom:14px;">
@@ -82,5 +112,20 @@
 
 {% else %}
 <div class="empty-state"><p>No students found for this batch.</p></div>
+{% endif %}
+
+<!-- Ad-hoc holiday declaration - tucked away since it's an occasional action -->
+<details style="margin-top:16px;">
+  <summary style="cursor:pointer; font-size:0.78rem; color:var(--ink-60);">Need to cancel class / declare a holiday for this date instead?</summary>
+  <form method="POST" action="{{ url_for('attendance_set_day_status') }}" class="card" style="margin-top:10px;">
+    <input type="hidden" name="date" value="{{ selected_date }}">
+    <input type="hidden" name="batch" value="{{ batch_filter }}">
+    <input type="hidden" name="action" value="holiday">
+    <label style="margin-top:0;">Reason (optional)</label>
+    <input type="text" name="reason" placeholder="e.g. Festival, teacher unavailable">
+    <button type="submit" class="btn btn-outline btn-sm" style="margin-top:10px; color:var(--brick); border-color:var(--brick);">Mark {{ selected_date }} as Holiday</button>
+  </form>
+</details>
+
 {% endif %}
 {% endblock %}
