@@ -47,6 +47,15 @@ marking, fee reports, and filtering throughout the app.
 **Phone numbers:** just enter the 10-digit mobile number — no country code needed.
 The app assumes India (+91) by default when building WhatsApp links.
 
+**Fee carry-forward & auto-generation:** any unpaid balance automatically carries
+into next month's due amount when that month's fees are generated — no manual
+tracking needed. Fees generate automatically on the last day of each month
+whenever someone opens the app that day. For reliability even on days nobody
+opens it, optionally set a `CRON_KEY` environment variable and point a free
+scheduler like [cron-job.org](https://cron-job.org) at
+`https://your-app.onrender.com/cron/generate-monthly-fees?key=YOUR_CRON_KEY`
+once a day — it's a safe no-op except on the last day of the month.
+
 ## 2. Changing the admin password
 
 Run this once, from the project folder (with venv active):

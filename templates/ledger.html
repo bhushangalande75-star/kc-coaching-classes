@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Fee Ledger - KC Coaching Classes{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="eyebrow">Ledger</div>
+  <h1>Fee Ledger — Month by Month</h1>
+</div>
+
+<form method="GET" class="btn-row" style="margin-bottom:14px;">
+  <select name="batch" onchange="this.form.submit()" style="flex:1;">
+    <option value="">All Batches</option>
+    {% for b in batches %}
+    <option value="{{ b.id }}" {{ 'selected' if batch_filter == b.id|string }}>{{ b.name }}</option>
+    {% endfor %}
+  </select>
+  <select name="months" onchange="this.form.submit()" style="flex:1;">
+    <option value="3" {{ 'selected' if months == 3 }}>Last 3 months</option>
+    <option value="6" {{ 'selected' if months == 6 }}>Last 6 months</option>
+    <option value="12" {{ 'selected' if months == 12 }}>Last 12 months</option>
+  </select>
+</form>
+
+<a href="{{ url_for('fees') }}" class="btn btn-outline btn-sm" style="margin-bottom:14px;">← Back to Fees</a>
+
+{% if rows %}
+<div class="ledger-scroll">
+  <table class="ledger-table">
+    <thead>
+      <tr>
+        <th class="ledger-sticky-col">Student</th>
+        {% for p in periods %}
+        <th>{{ p }}</th>
+        {% endfor %}
+        <th>Outstanding</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td class="ledger-sticky-col">
+          <div class="att-name" style="font-size:0.85rem;">{{ row.student.name }}</div>
+          <div class="att-batch">{{ row.student.batch_name() }}</div>
+        </td>
+        {% for f in row.cells %}
+        <td>
+          {% if f %}
+            <span class="badge badge-{{ f.status }}">{{ f.status }}</span>
+            <div style="font-size:0.72rem; color:var(--ink-60); margin-top:3px;">₹{{ '%.0f'|format(f.amount_paid) }}/{{ '%.0f'|format(f.amount_due) }}</div>
+          {% else %}
+            <span style="color:var(--ink-30); font-size:0.78rem;">—</span>
+          {% endif %}
+        </td>
+        {% endfor %}
+        <td>
+          {% if row.outstanding > 0 %}
+          <strong style="color:var(--brick);">₹{{ '%.0f'|format(row.outstanding) }}</strong>
+          {% else %}
+          <span style="color:var(--sage);">✓ clear</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p style="font-size:0.72rem; color:var(--ink-60); margin-top:10px;">Scroll sideways to see more months. "—" means no fee entry was generated for that student that month.</p>
+{% else %}
+<div class="empty-state"><p>No students found for this batch.</p></div>
+{% endif %}
+{% endblock %}

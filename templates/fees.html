@@ -6,15 +6,34 @@
   <h1>Fees — {{ period }}</h1>
 </div>
 
-<form method="GET" class="btn-row" style="margin-bottom:14px;">
+<form method="GET" class="btn-row" style="margin-bottom:10px;">
   <input type="month" name="period" value="{{ period }}" onchange="this.form.submit()" style="flex:1;">
+  <select name="batch" onchange="this.form.submit()" style="flex:1;">
+    <option value="">All Batches</option>
+    {% for b in batches %}
+    <option value="{{ b.id }}" {{ 'selected' if batch_filter == b.id|string }}>{{ b.name }}</option>
+    {% endfor %}
+  </select>
   <select name="status" onchange="this.form.submit()" style="flex:1;">
     <option value="">All Status</option>
     <option value="pending" {{ 'selected' if status_filter=='pending' }}>Pending</option>
     <option value="partial" {{ 'selected' if status_filter=='partial' }}>Partial</option>
     <option value="paid" {{ 'selected' if status_filter=='paid' }}>Paid</option>
+    <option value="waived" {{ 'selected' if status_filter=='waived' }}>Waived</option>
   </select>
 </form>
+
+<div class="btn-row" style="margin-bottom:14px;">
+  <a href="{{ url_for('fees_ledger') }}" class="btn btn-outline btn-sm">View Month-by-Month Ledger →</a>
+  <form method="POST" action="{{ url_for('fees_generate_next_month') }}" style="display:inline;"
+        onsubmit="return confirm('Generate next month\'s fee entries now? Any unpaid balance this month will carry forward automatically.')">
+    <button type="submit" class="btn btn-outline btn-sm">Generate Next Month Now</button>
+  </form>
+</div>
+
+<p style="font-size:0.72rem; color:var(--ink-60); margin:-6px 0 14px;">
+  Fees also auto-generate on the last day of each month, carrying forward any unpaid balance from the month before.
+</p>
 
 {% if students_without_fee %}
 <div class="card" style="background:var(--brick-bg); border-color:transparent;">
@@ -33,6 +52,7 @@
 <!-- Hidden form submitted by JS for bulk actions -->
 <form method="POST" action="{{ url_for('fees_bulk_pay') }}" id="bulkForm">
   <input type="hidden" name="period" value="{{ period }}">
+  <input type="hidden" name="batch" value="{{ batch_filter }}">
   <div id="bulkIdsContainer"></div>
 </form>
 
@@ -47,11 +67,16 @@
   <label class="check-label"><input type="checkbox" id="selectAll" onclick="toggleAll(this)"> Select all unpaid on this page</label>
 </div>
 
+{% set ns = namespace(last_batch=None) %}
 {% for f in fees %}
+  {% if not batch_filter and f.student.batch_name() != ns.last_batch %}
+    <div class="ledger-batch-header">{{ f.student.batch_name() }}</div>
+    {% set ns.last_batch = f.student.batch_name() %}
+  {% endif %}
 <div class="card fee-card">
   <div style="display:flex; gap:10px; align-items:flex-start;">
     <label class="check-label" style="flex-shrink:0; margin-top:3px;">
-      <input type="checkbox" class="fee-checkbox" value="{{ f.id }}" onchange="updateBulkBar()" {{ 'disabled' if f.status == 'paid' }}>
+      <input type="checkbox" class="fee-checkbox" value="{{ f.id }}" onchange="updateBulkBar()" {{ 'disabled' if f.status in ['paid', 'waived'] }}>
     </label>
     <div style="flex:1; min-width:0;">
       <div style="display:flex; justify-content:space-between; align-items:flex-start;">
@@ -68,21 +93,25 @@
         <div>Balance: <strong style="color:var(--brick);">₹{{ '%.0f'|format(f.balance()) }}</strong></div>
       </div>
 
-      {% if f.status != 'paid' %}
+      {% if f.note %}
+      <div style="font-size:0.75rem; color:var(--marigold-dark); margin-top:6px; font-style:italic;">{{ f.note }}</div>
+      {% endif %}
+
+      {% if f.status != 'paid' and f.status != 'waived' %}
       <form method="POST" action="{{ url_for('fees_mark_paid', fee_id=f.id) }}" style="display:inline-block; margin-top:10px;">
         <button type="submit" class="btn btn-marigold btn-sm">Mark Fully Paid</button>
       </form>
-      {% endif %}
 
       <form method="POST" action="{{ url_for('fees_pay', fee_id=f.id) }}" class="btn-row" style="margin-top:8px;">
         <input type="number" step="0.01" name="amount_paid" value="{{ f.amount_paid }}" style="max-width:120px;" placeholder="Custom amount">
         <button type="submit" class="btn btn-primary btn-sm">Update Paid</button>
       </form>
+      {% endif %}
 
       <div class="btn-row" style="margin-top:8px;">
-        {% if f.status != 'paid' %}
+        {% if f.status != 'paid' and f.status != 'waived' %}
         <a href="{{ url_for('fees_remind', fee_id=f.id) }}" class="btn btn-whatsapp btn-sm">Remind on WhatsApp</a>
-        {% else %}
+        {% elif f.status == 'paid' %}
         <a href="{{ url_for('fees_receipt_msg', fee_id=f.id) }}" class="btn btn-whatsapp btn-sm">Send Receipt Msg</a>
         {% endif %}
         <a href="{{ url_for('fees_receipt_pdf', fee_id=f.id) }}" target="_blank" class="btn btn-outline btn-sm">View Receipt PDF</a>

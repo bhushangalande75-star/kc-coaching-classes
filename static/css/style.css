@@ -241,6 +241,31 @@ h1.display, .page-head h1 { letter-spacing: -0.3px; }
 }
 .fee-card { padding: 14px 16px; }
 
+/* ---- Ledger table ---- */
+.ledger-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--paper-line);
+  border-radius: var(--radius);
+  background: #fff;
+}
+.ledger-table { width: auto; min-width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+.ledger-table th, .ledger-table td {
+  padding: 8px 10px; text-align: center; white-space: nowrap;
+  border-bottom: 1px solid var(--paper-line); border-right: 1px solid var(--paper-line);
+}
+.ledger-table th { background: var(--ink); color: #fff; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.4px; }
+.ledger-sticky-col {
+  position: sticky; left: 0; z-index: 2;
+  background: #fff; text-align: left !important; min-width: 130px;
+}
+.ledger-table th.ledger-sticky-col { background: var(--ink); z-index: 3; }
+
+.ledger-batch-header {
+  font-family: 'Lora', serif; font-weight: 700; font-size: 0.95rem;
+  color: var(--ink); margin: 18px 0 8px; padding-bottom: 4px;
+  border-bottom: 2px solid var(--marigold);
+}
+
 @media (max-width: 420px) {
   .stat-grid { grid-template-columns: 1fr 1fr; }
 }

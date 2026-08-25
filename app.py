@@ -47,6 +47,72 @@ login_manager.login_view = "login"
 login_manager.init_app(app)
 
 ADMIN_RECOVERY_KEY = os.environ.get("ADMIN_RECOVERY_KEY", "")
+CRON_KEY = os.environ.get("CRON_KEY", "")
+
+
+def previous_period_str(period):
+    y, m = map(int, period.split("-"))
+    m -= 1
+    if m == 0:
+        y -= 1
+        m = 12
+    return f"{y:04d}-{m:02d}"
+
+
+def next_period_str(period):
+    y, m = map(int, period.split("-"))
+    m += 1
+    if m == 13:
+        y += 1
+        m = 1
+    return f"{y:04d}-{m:02d}"
+
+
+def compute_due_and_note(student, period):
+    """Base fee plus any unpaid balance from the previous month, carried forward."""
+    base = student.fee_amount
+    prev_period = previous_period_str(period)
+    prev_fee = Fee.query.filter_by(student_id=student.id, period=prev_period).first()
+    carry = 0.0
+    note = None
+    if prev_fee and prev_fee.status in ("pending", "partial") and prev_fee.balance() > 0:
+        carry = prev_fee.balance()
+        note = f"Includes Rs.{carry:.0f} carried forward from {prev_period}"
+    return round(base + carry, 2), note
+
+
+def generate_fees_for_period(period, due_date_obj=None):
+    """Create Fee rows for every active student who doesn't already have one for
+    this period, automatically carrying forward any unpaid balance from last month."""
+    created = 0
+    for s in Student.query.filter_by(active=True).all():
+        if Fee.query.filter_by(student_id=s.id, period=period).first():
+            continue
+        due, note = compute_due_and_note(s, period)
+        db.session.add(Fee(
+            student_id=s.id, period=period, amount_due=due, amount_paid=0,
+            status="pending", due_date=due_date_obj, note=note,
+        ))
+        created += 1
+    db.session.commit()
+    return created
+
+
+def maybe_auto_generate_next_month():
+    """Runs on every dashboard load — cheap no-op unless today is the last day of
+    the month and next month's fees haven't been generated yet. Keeps this from
+    depending on any background scheduler, which Render's free tier doesn't offer
+    on the web service itself."""
+    today = date.today()
+    last_day = calendar.monthrange(today.year, today.month)[1]
+    if today.day != last_day:
+        return
+    current_period = today.strftime("%Y-%m")
+    next_period = next_period_str(current_period)
+    if Fee.query.filter_by(period=next_period).first():
+        return  # already generated (e.g. by the cron ping or a manual click)
+    generate_fees_for_period(next_period)
+    print(f"[auto-generate] Created fee entries for {next_period} on last day of {current_period}")
 
 
 @login_manager.user_loader
@@ -114,6 +180,7 @@ def forgot_password():
 @app.route("/")
 @login_required
 def dashboard():
+    maybe_auto_generate_next_month()
     today = date.today()
     total_students = Student.query.filter_by(active=True).count()
     present_today = Attendance.query.filter_by(date=today, status="present").count()
@@ -463,46 +530,104 @@ def shared_attendance_pdf(token):
 def fees():
     period = request.args.get("period", date.today().strftime("%Y-%m"))
     status_filter = request.args.get("status", "")
+    batch_filter = request.args.get("batch", "", type=str)
 
     q = Fee.query.filter_by(period=period)
     if status_filter:
         q = q.filter_by(status=status_filter)
-    fee_list = q.join(Student).join(Batch, isouter=True).order_by(Batch.name, Student.name).all()
+    q = q.join(Student).join(Batch, isouter=True)
+    if batch_filter:
+        q = q.filter(Student.batch_id == int(batch_filter))
+    fee_list = q.order_by(Batch.name, Student.name).all()
 
-    students_without_fee = (
-        Student.query.filter_by(active=True)
-        .filter(~Student.fees.any(Fee.period == period))
-        .all()
-    )
+    students_without_fee_q = Student.query.filter_by(active=True).filter(~Student.fees.any(Fee.period == period))
+    if batch_filter:
+        students_without_fee_q = students_without_fee_q.filter_by(batch_id=int(batch_filter))
+    students_without_fee = students_without_fee_q.all()
+
+    all_batches = Batch.query.order_by(Batch.name).all()
 
     return render_template(
         "fees.html",
         fees=fee_list,
         period=period,
         status_filter=status_filter,
+        batch_filter=batch_filter,
+        batches=all_batches,
         students_without_fee=students_without_fee,
+    )
+
+
+@app.route("/fees/ledger")
+@login_required
+def fees_ledger():
+    """Multi-month view — every student as a row, each selected month as a column,
+    so the teacher can see payment history and outstanding balances at a glance."""
+    batch_filter = request.args.get("batch", "", type=str)
+    months = request.args.get("months", 6, type=int)
+    months = max(1, min(months, 12))
+
+    today = date.today()
+    periods = []
+    y, m = today.year, today.month
+    for i in range(months - 1, -1, -1):
+        mm = m - i
+        yy = y
+        while mm <= 0:
+            mm += 12
+            yy -= 1
+        periods.append(f"{yy:04d}-{mm:02d}")
+
+    q = Student.query.filter_by(active=True).join(Batch, isouter=True)
+    if batch_filter:
+        q = q.filter(Student.batch_id == int(batch_filter))
+    all_students = q.order_by(Batch.name, Student.name).all()
+
+    fee_map = {}
+    all_fees = Fee.query.filter(Fee.period.in_(periods)).all()
+    for f in all_fees:
+        fee_map[(f.student_id, f.period)] = f
+
+    rows = []
+    for s in all_students:
+        cells = [fee_map.get((s.id, p)) for p in periods]
+        outstanding = sum(f.balance() for f in cells if f and f.status in ("pending", "partial"))
+        rows.append({"student": s, "cells": cells, "outstanding": outstanding})
+
+    all_batches = Batch.query.order_by(Batch.name).all()
+
+    return render_template(
+        "ledger.html",
+        periods=periods,
+        rows=rows,
+        batches=all_batches,
+        batch_filter=batch_filter,
+        months=months,
     )
 
 
 @app.route("/fees/generate", methods=["POST"])
 @login_required
 def fees_generate():
-    """Bulk-create pending Fee rows for all active students for a given period."""
+    """Bulk-create pending Fee rows for all active students for a given period,
+    automatically carrying forward any unpaid balance from the previous month."""
     period = request.form["period"]
     due_day = request.form.get("due_date")
     due_date_obj = datetime.strptime(due_day, "%Y-%m-%d").date() if due_day else None
-
-    created = 0
-    for s in Student.query.filter_by(active=True).all():
-        exists = Fee.query.filter_by(student_id=s.id, period=period).first()
-        if not exists:
-            db.session.add(Fee(
-                student_id=s.id, period=period, amount_due=s.fee_amount,
-                amount_paid=0, status="pending", due_date=due_date_obj,
-            ))
-            created += 1
-    db.session.commit()
+    created = generate_fees_for_period(period, due_date_obj)
     flash(f"Generated {created} fee entries for {period}.", "success")
+    return redirect(url_for("fees", period=period))
+
+
+@app.route("/fees/generate-next-month", methods=["POST"])
+@login_required
+def fees_generate_next_month():
+    """Manual override — generate next month's fees right now, regardless of
+    what day it is, in case the teacher doesn't want to wait for the last day."""
+    current_period = date.today().strftime("%Y-%m")
+    period = next_period_str(current_period)
+    created = generate_fees_for_period(period)
+    flash(f"Generated {created} fee entries for {period} (next month), with carry-forward applied.", "success")
     return redirect(url_for("fees", period=period))
 
 
@@ -592,6 +717,7 @@ def fees_bulk_pay():
     """Mark multiple selected fee entries as fully paid at once."""
     fee_ids = request.form.getlist("fee_ids")
     period = request.form.get("period", date.today().strftime("%Y-%m"))
+    batch_filter = request.form.get("batch", "")
     count = 0
     for fid in fee_ids:
         fee = db.session.get(Fee, int(fid))
@@ -602,7 +728,7 @@ def fees_bulk_pay():
             count += 1
     db.session.commit()
     flash(f"Marked {count} fee entr{'y' if count == 1 else 'ies'} as paid.", "success")
-    return redirect(url_for("fees", period=period))
+    return redirect(url_for("fees", period=period, batch=batch_filter))
 
 
 @app.route("/fees/<int:fee_id>/remind")
@@ -707,6 +833,22 @@ def reports_export_csv():
         mimetype="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
+
+
+# ---------- Optional external cron trigger ----------
+# Render's free web service has no built-in scheduler, and the auto-generate check
+# only fires when someone loads the dashboard. If you want fees generated reliably
+# even on days nobody opens the app, set a CRON_KEY env var and point a free
+# service like cron-job.org at this URL once a day: /cron/generate-monthly-fees?key=...
+# It's a no-op except on the last day of the month, so it's safe to ping daily.
+
+@app.route("/cron/generate-monthly-fees")
+def cron_generate_monthly_fees():
+    key = request.args.get("key", "")
+    if not CRON_KEY or key != CRON_KEY:
+        abort(404)
+    maybe_auto_generate_next_month()
+    return "ok"
 
 
 # ---------- PWA ----------
