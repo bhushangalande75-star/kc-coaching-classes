@@ -9,6 +9,10 @@ from dotenv import load_dotenv
 from itsdangerous import URLSafeSerializer, BadSignature
 
 from models import db, Admin, Student, Attendance, Fee, Batch, DateOverride, normalize_indian_mobile
+from services import (
+    previous_period_str, next_period_str, compute_due_and_note,
+    generate_fees_for_period, maybe_auto_generate_next_month, get_share_serializer,
+)
 from utils import (
     whatsapp_link, fee_reminder_message, fee_receipt_message,
     attendance_alert_message, attendance_share_message,
@@ -42,6 +46,9 @@ app.config["SESSION_REFRESH_EACH_REQUEST"] = True
 
 db.init_app(app)
 
+from api import api as api_blueprint
+app.register_blueprint(api_blueprint)
+
 login_manager = LoginManager()
 login_manager.login_view = "login"
 login_manager.init_app(app)
@@ -50,78 +57,13 @@ ADMIN_RECOVERY_KEY = os.environ.get("ADMIN_RECOVERY_KEY", "")
 CRON_KEY = os.environ.get("CRON_KEY", "")
 
 
-def previous_period_str(period):
-    y, m = map(int, period.split("-"))
-    m -= 1
-    if m == 0:
-        y -= 1
-        m = 12
-    return f"{y:04d}-{m:02d}"
-
-
-def next_period_str(period):
-    y, m = map(int, period.split("-"))
-    m += 1
-    if m == 13:
-        y += 1
-        m = 1
-    return f"{y:04d}-{m:02d}"
-
-
-def compute_due_and_note(student, period):
-    """Base fee plus any unpaid balance from the previous month, carried forward."""
-    base = student.fee_amount
-    prev_period = previous_period_str(period)
-    prev_fee = Fee.query.filter_by(student_id=student.id, period=prev_period).first()
-    carry = 0.0
-    note = None
-    if prev_fee and prev_fee.status in ("pending", "partial") and prev_fee.balance() > 0:
-        carry = prev_fee.balance()
-        note = f"Includes Rs.{carry:.0f} carried forward from {prev_period}"
-    return round(base + carry, 2), note
-
-
-def generate_fees_for_period(period, due_date_obj=None):
-    """Create Fee rows for every active student who doesn't already have one for
-    this period, automatically carrying forward any unpaid balance from last month."""
-    created = 0
-    for s in Student.query.filter_by(active=True).all():
-        if Fee.query.filter_by(student_id=s.id, period=period).first():
-            continue
-        due, note = compute_due_and_note(s, period)
-        db.session.add(Fee(
-            student_id=s.id, period=period, amount_due=due, amount_paid=0,
-            status="pending", due_date=due_date_obj, note=note,
-        ))
-        created += 1
-    db.session.commit()
-    return created
-
-
-def maybe_auto_generate_next_month():
-    """Runs on every dashboard load — cheap no-op unless today is the last day of
-    the month and next month's fees haven't been generated yet. Keeps this from
-    depending on any background scheduler, which Render's free tier doesn't offer
-    on the web service itself."""
-    today = date.today()
-    last_day = calendar.monthrange(today.year, today.month)[1]
-    if today.day != last_day:
-        return
-    current_period = today.strftime("%Y-%m")
-    next_period = next_period_str(current_period)
-    if Fee.query.filter_by(period=next_period).first():
-        return  # already generated (e.g. by the cron ping or a manual click)
-    generate_fees_for_period(next_period)
-    print(f"[auto-generate] Created fee entries for {next_period} on last day of {current_period}")
-
-
 @login_manager.user_loader
 def load_user(user_id):
     return db.session.get(Admin, int(user_id))
 
 
 def get_serializer():
-    return URLSafeSerializer(app.config["SECRET_KEY"], salt="attendance-share")
+    return get_share_serializer()
 
 
 # ---------- Auth ----------
