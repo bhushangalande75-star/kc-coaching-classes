@@ -14,6 +14,7 @@ from models import db, Admin, Student, Batch, Attendance, Fee, DateOverride, nor
 from services import (
     previous_period_str, next_period_str, compute_due_and_note,
     generate_fees_for_period, maybe_auto_generate_next_month, get_share_serializer,
+    get_dashboard_chart_data,
 )
 from utils import (
     fee_reminder_message, fee_receipt_message, attendance_share_message,
@@ -51,7 +52,6 @@ def api_login_required(f):
 
 
 # ---------- Serializers ----------
-
 def student_to_dict(s):
     return {
         "id": s.id, "name": s.name, "batch_id": s.batch_id, "batch_name": s.batch_name(),
@@ -80,7 +80,6 @@ def fee_to_dict(f):
 
 
 # ---------- Auth ----------
-
 @api.route("/login", methods=["POST"])
 def api_login():
     data = request.get_json(force=True, silent=True) or {}
@@ -110,12 +109,12 @@ def api_forgot_password():
 
 
 # ---------- Dashboard ----------
-
 @api.route("/dashboard", methods=["GET"])
 @api_login_required
 def api_dashboard():
     maybe_auto_generate_next_month()
     today = date.today()
+
     total_students = Student.query.filter_by(active=True).count()
     present_today = Attendance.query.filter_by(date=today, status="present").count()
     absent_today = Attendance.query.filter_by(date=today, status="absent").count()
@@ -133,31 +132,10 @@ def api_dashboard():
         .all()
     )
 
-    attendance_labels, attendance_present, attendance_absent = [], [], []
-    for i in range(13, -1, -1):
-        d = today - timedelta(days=i)
-        p = Attendance.query.filter_by(date=d, status="present").count()
-        a = Attendance.query.filter_by(date=d, status="absent").count()
-        attendance_labels.append(d.strftime("%d %b"))
-        attendance_present.append(p)
-        attendance_absent.append(a)
-
-    fee_labels, fee_due, fee_collected = [], [], []
-    y, m = today.year, today.month
-    months = []
-    for i in range(5, -1, -1):
-        mm = m - i
-        yy = y
-        while mm <= 0:
-            mm += 12
-            yy -= 1
-        months.append((yy, mm))
-    for yy, mm in months:
-        period_str = f"{yy:04d}-{mm:02d}"
-        month_fees = Fee.query.filter_by(period=period_str).all()
-        fee_labels.append(datetime(yy, mm, 1).strftime("%b %Y"))
-        fee_due.append(sum(f.amount_due for f in month_fees))
-        fee_collected.append(sum(f.amount_paid for f in month_fees))
+    # Computed with 2 aggregate SQL queries instead of ~20 per-day/per-month
+    # queries — see get_dashboard_chart_data() in services.py. Same output
+    # shape as before, just faster.
+    chart_data = get_dashboard_chart_data()
 
     return jsonify({
         "total_students": total_students,
@@ -173,14 +151,19 @@ def api_dashboard():
         "is_holiday_today": DateOverride.is_holiday(today),
         "holiday_reason": DateOverride.get_reason(today),
         "attendance_chart": {
-            "labels": attendance_labels, "present": attendance_present, "absent": attendance_absent,
+            "labels": chart_data["attendance_labels"],
+            "present": chart_data["attendance_present"],
+            "absent": chart_data["attendance_absent"],
         },
-        "fee_chart": {"labels": fee_labels, "due": fee_due, "collected": fee_collected},
+        "fee_chart": {
+            "labels": chart_data["fee_labels"],
+            "due": chart_data["fee_due"],
+            "collected": chart_data["fee_collected"],
+        },
     })
 
 
 # ---------- Batches ----------
-
 @api.route("/batches", methods=["GET"])
 @api_login_required
 def api_batches():
@@ -234,7 +217,6 @@ def api_batch_delete(batch_id):
 
 
 # ---------- Students ----------
-
 @api.route("/students", methods=["GET"])
 @api_login_required
 def api_students():
@@ -300,21 +282,17 @@ def api_student_deactivate(student_id):
 
 
 # ---------- Attendance ----------
-
 @api.route("/attendance", methods=["GET"])
 @api_login_required
 def api_attendance_get():
     date_str = request.args.get("date", date.today().isoformat())
     batch_id = request.args.get("batch", type=int)
     d = datetime.strptime(date_str, "%Y-%m-%d").date()
-
     q = Student.query.filter_by(active=True)
     if batch_id:
         q = q.filter_by(batch_id=batch_id)
     students = q.order_by(Student.name).all()
-
     marks = {a.student_id: a.status for a in Attendance.query.filter_by(date=d).all()}
-
     return jsonify({
         "date": d.isoformat(),
         "is_sunday": d.weekday() == 6,
@@ -435,14 +413,12 @@ def api_attendance_notify(student_id):
 
 
 # ---------- Fees ----------
-
 @api.route("/fees", methods=["GET"])
 @api_login_required
 def api_fees():
     period = request.args.get("period", date.today().strftime("%Y-%m"))
     status = request.args.get("status", "")
     batch_id = request.args.get("batch", type=int)
-
     q = Fee.query.filter_by(period=period)
     if status:
         q = q.filter_by(status=status)

@@ -4,11 +4,12 @@ JSON API used by the Flutter mobile app (api.py). Keeping this here avoids
 duplicating fee/attendance rules in two places.
 """
 import calendar
-from datetime import date
+from datetime import date, datetime, timedelta
 from flask import current_app
 from itsdangerous import URLSafeSerializer
+from sqlalchemy import func
 
-from models import db, Student, Fee, DateOverride
+from models import db, Student, Attendance, Fee, DateOverride
 
 
 def get_share_serializer():
@@ -78,3 +79,67 @@ def maybe_auto_generate_next_month():
         return
     generate_fees_for_period(next_period)
     print(f"[auto-generate] Created fee entries for {next_period} on last day of {current_period}")
+
+
+def get_dashboard_chart_data():
+    """Attendance (last 14 days) + fee collection (last 6 months) chart data
+    for the dashboard, computed with 2 aggregate SQL queries total instead of
+    ~20 separate per-day / per-month queries. Both app.py's web dashboard and
+    api.py's mobile API call this, so the two stay in sync and both get the
+    speed-up. Returns the exact same values the old per-day/per-month loops
+    produced — only how they're computed has changed."""
+    today = date.today()
+
+    # ---- Attendance: last 14 days, one grouped query ----
+    start = today - timedelta(days=13)
+    rows = (
+        db.session.query(Attendance.date, Attendance.status, func.count(Attendance.id))
+        .filter(Attendance.date >= start, Attendance.date <= today)
+        .group_by(Attendance.date, Attendance.status)
+        .all()
+    )
+    counts = {(d, status): cnt for d, status, cnt in rows}
+
+    attendance_labels, attendance_present, attendance_absent = [], [], []
+    for i in range(13, -1, -1):
+        d = today - timedelta(days=i)
+        attendance_labels.append(d.strftime("%d %b"))
+        attendance_present.append(counts.get((d, "present"), 0))
+        attendance_absent.append(counts.get((d, "absent"), 0))
+
+    # ---- Fees: last 6 months, one grouped query ----
+    y, m = today.year, today.month
+    months = []
+    for i in range(5, -1, -1):
+        mm = m - i
+        yy = y
+        while mm <= 0:
+            mm += 12
+            yy -= 1
+        months.append((yy, mm))
+    periods = [f"{yy:04d}-{mm:02d}" for yy, mm in months]
+
+    fee_rows = (
+        db.session.query(Fee.period, func.sum(Fee.amount_due), func.sum(Fee.amount_paid))
+        .filter(Fee.period.in_(periods))
+        .group_by(Fee.period)
+        .all()
+    )
+    fee_sums = {period: (due or 0, paid or 0) for period, due, paid in fee_rows}
+
+    fee_labels, fee_due, fee_collected = [], [], []
+    for yy, mm in months:
+        period_str = f"{yy:04d}-{mm:02d}"
+        due, paid = fee_sums.get(period_str, (0, 0))
+        fee_labels.append(datetime(yy, mm, 1).strftime("%b %Y"))
+        fee_due.append(due)
+        fee_collected.append(paid)
+
+    return {
+        "attendance_labels": attendance_labels,
+        "attendance_present": attendance_present,
+        "attendance_absent": attendance_absent,
+        "fee_labels": fee_labels,
+        "fee_due": fee_due,
+        "fee_collected": fee_collected,
+    }
