@@ -13,6 +13,7 @@ from models import db, Admin, Student, Attendance, Fee, Batch, DateOverride, nor
 from services import (
     previous_period_str, next_period_str, compute_due_and_note,
     generate_fees_for_period, maybe_auto_generate_next_month, get_share_serializer,
+    get_dashboard_chart_data,
 )
 from utils import (
     whatsapp_link, fee_reminder_message, fee_receipt_message,
@@ -157,33 +158,16 @@ def dashboard():
         .all()
     )
 
-    # --- Analytics: last 14 days attendance trend ---
-    attendance_labels, attendance_present, attendance_absent = [], [], []
-    for i in range(13, -1, -1):
-        d = today - timedelta(days=i)
-        p = Attendance.query.filter_by(date=d, status="present").count()
-        a = Attendance.query.filter_by(date=d, status="absent").count()
-        attendance_labels.append(d.strftime("%d %b"))
-        attendance_present.append(p)
-        attendance_absent.append(a)
-
-    # --- Analytics: last 6 months fee collection ---
-    fee_labels, fee_due, fee_collected = [], [], []
-    y, m = today.year, today.month
-    months = []
-    for i in range(5, -1, -1):
-        mm = m - i
-        yy = y
-        while mm <= 0:
-            mm += 12
-            yy -= 1
-        months.append((yy, mm))
-    for yy, mm in months:
-        period_str = f"{yy:04d}-{mm:02d}"
-        month_fees = Fee.query.filter_by(period=period_str).all()
-        fee_labels.append(datetime(yy, mm, 1).strftime("%b %Y"))
-        fee_due.append(sum(f.amount_due for f in month_fees))
-        fee_collected.append(sum(f.amount_paid for f in month_fees))
+    # --- Analytics: 14-day attendance trend + 6-month fee collection ---
+    # Computed with 2 aggregate SQL queries instead of ~20 per-day/per-month
+    # queries — see get_dashboard_chart_data() in services.py.
+    chart_data = get_dashboard_chart_data()
+    attendance_labels = chart_data["attendance_labels"]
+    attendance_present = chart_data["attendance_present"]
+    attendance_absent = chart_data["attendance_absent"]
+    fee_labels = chart_data["fee_labels"]
+    fee_due = chart_data["fee_due"]
+    fee_collected = chart_data["fee_collected"]
 
     return render_template(
         "dashboard.html",
