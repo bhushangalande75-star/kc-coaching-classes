@@ -7,6 +7,7 @@ from flask import Flask, render_template, request, redirect, url_for, flash, sen
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from dotenv import load_dotenv
 from itsdangerous import URLSafeSerializer, BadSignature
+from sqlalchemy import text
 
 from models import db, Admin, Student, Attendance, Fee, Batch, DateOverride, normalize_indian_mobile
 from services import (
@@ -23,6 +24,7 @@ load_dotenv()
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-change-me")
+
 basedir = os.path.abspath(os.path.dirname(__file__))
 _db_url = os.environ.get(
     "DATABASE_URL", f"sqlite:///{os.path.join(basedir, 'instance', 'kc_coaching.db')}"
@@ -36,6 +38,7 @@ app.config["SQLALCHEMY_DATABASE_URI"] = _db_url
 # so it won't exist yet on a fresh deploy where DATABASE_URL isn't set).
 if _db_url.startswith("sqlite"):
     os.makedirs(os.path.join(basedir, "instance"), exist_ok=True)
+
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 # Auto-logout after 5 minutes of inactivity. Flask refreshes the session's expiry
@@ -48,6 +51,21 @@ db.init_app(app)
 
 from api import api as api_blueprint
 app.register_blueprint(api_blueprint)
+
+
+# ---------- Health check (public, no login) ----------
+# Used by an external uptime pinger + the keepalive bot. Runs a trivial query
+# so it also keeps the Neon database warm, not just the web service — pinging
+# "/" alone doesn't touch the DB since that route requires login and just
+# redirects unauthenticated requests to /login.
+@app.route("/health")
+def health():
+    try:
+        db.session.execute(text("SELECT 1"))
+        return jsonify({"status": "ok"}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "detail": str(e)}), 500
+
 
 login_manager = LoginManager()
 login_manager.login_view = "login"
@@ -67,7 +85,6 @@ def get_serializer():
 
 
 # ---------- Auth ----------
-
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if current_user.is_authenticated:
@@ -98,7 +115,6 @@ def forgot_password():
         recovery_key = request.form.get("recovery_key", "").strip()
         new_password = request.form.get("new_password", "")
         confirm_password = request.form.get("confirm_password", "")
-
         if not ADMIN_RECOVERY_KEY:
             flash("Password recovery isn't set up yet. Set the ADMIN_RECOVERY_KEY environment "
                   "variable on your server first.", "error")
@@ -118,12 +134,12 @@ def forgot_password():
 
 
 # ---------- Dashboard ----------
-
 @app.route("/")
 @login_required
 def dashboard():
     maybe_auto_generate_next_month()
     today = date.today()
+
     total_students = Student.query.filter_by(active=True).count()
     present_today = Attendance.query.filter_by(date=today, status="present").count()
     absent_today = Attendance.query.filter_by(date=today, status="absent").count()
@@ -191,7 +207,6 @@ def dashboard():
 
 
 # ---------- Batches ----------
-
 @app.route("/batches")
 @login_required
 def batches():
@@ -250,7 +265,6 @@ def batch_delete(batch_id):
 
 
 # ---------- Students ----------
-
 @app.route("/students")
 @login_required
 def students():
@@ -315,7 +329,6 @@ def student_deactivate(student_id):
 
 
 # ---------- Attendance ----------
-
 @app.route("/attendance", methods=["GET", "POST"])
 @login_required
 def attendance():
@@ -345,7 +358,6 @@ def attendance():
         q = q.filter_by(batch_id=int(batch_filter))
     all_students = q.order_by(Student.name).all()
     all_batches = Batch.query.order_by(Batch.name).all()
-
     existing_marks = {
         a.student_id: a.status
         for a in Attendance.query.filter_by(date=d).all()
@@ -494,7 +506,6 @@ def shared_attendance_pdf(token):
     s = db.get_or_404(Student, data["sid"])
     period = data["period"]
     year, month = map(int, period.split("-"))
-
     records = (
         Attendance.query.filter_by(student_id=s.id)
         .filter(db.extract("year", Attendance.date) == year, db.extract("month", Attendance.date) == month)
@@ -502,14 +513,12 @@ def shared_attendance_pdf(token):
         .all()
     )
     day_status = [(r.date, r.status) for r in records]
-
     buf = generate_attendance_pdf(s, period, day_status)
     filename = f"attendance_{s.name.replace(' ', '_')}_{period}.pdf"
     return send_file(buf, mimetype="application/pdf", as_attachment=False, download_name=filename)
 
 
 # ---------- Fees ----------
-
 @app.route("/fees")
 @login_required
 def fees():
@@ -745,7 +754,6 @@ def fees_receipt_pdf(fee_id):
 
 
 # ---------- Reports (fee collection) ----------
-
 @app.route("/reports")
 @login_required
 def reports():
@@ -826,7 +834,6 @@ def reports_export_csv():
 # even on days nobody opens the app, set a CRON_KEY env var and point a free
 # service like cron-job.org at this URL once a day: /cron/generate-monthly-fees?key=...
 # It's a no-op except on the last day of the month, so it's safe to ping daily.
-
 @app.route("/cron/generate-monthly-fees")
 def cron_generate_monthly_fees():
     key = request.args.get("key", "")
@@ -837,7 +844,6 @@ def cron_generate_monthly_fees():
 
 
 # ---------- PWA ----------
-
 @app.route("/manifest.json")
 def manifest():
     return app.send_static_file("manifest.json")
@@ -849,7 +855,6 @@ def service_worker():
 
 
 # ---------- CLI: create admin ----------
-
 @app.cli.command("create-admin")
 def create_admin():
     """Usage: flask create-admin"""
@@ -873,8 +878,7 @@ def run_lightweight_migrations():
     actually in the database and ALTERs the table to add anything missing.
     Safe to run every startup — it's a no-op once columns already exist.
     """
-    from sqlalchemy import inspect, text
-
+    from sqlalchemy import inspect
     inspector = inspect(db.engine)
     existing_tables = inspector.get_table_names()
 
@@ -902,8 +906,7 @@ def migrate_legacy_batches():
     point students at it via the new batch_id column. Safe to run every startup —
     it only touches rows where batch_id is still empty.
     """
-    from sqlalchemy import inspect, text
-
+    from sqlalchemy import inspect
     inspector = inspect(db.engine)
     if "student" not in inspector.get_table_names():
         return
